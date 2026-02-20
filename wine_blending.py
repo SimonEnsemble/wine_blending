@@ -444,47 +444,106 @@ def _(mo):
 
 
 @app.cell
-def _(W, build_linear_problem, np):
+def _(A, b, np):
+    Ab = np.hstack([A, b])
+    np.linalg.matrix_rank(Ab)
+    return
+
+
+@app.cell
+def _(W, build_linear_problem, np, scipy):
     def constrained_tls_soln(
         pure_features, blend_features, blend_id, 
-        verbose=False, scale_by_W=True, try_new=False
+        verbose=False, scale_by_W=True, run_checks=False
     ):
         A, b = build_linear_problem(pure_features, blend_features, blend_id)
 
         # build augmented matrix [A; b]
         Ab = np.hstack([A, b])
 
+        # case M+1 > N
+        M = pure_features.shape[1] # number of constituents
+        N = pure_features.shape[0] # number of parent mixtures
+
         # scale for variances
         if scale_by_W:
             Ab = W @ Ab
 
-        if verbose:
-            print("rank of [A b]: ", np.linalg.matrix_rank(Ab))
-            print("size of [A b]: ", Ab.shape, "\n")
+        if run_checks:
+            # ☑️ [A b] full rank
+            assert np.linalg.matrix_rank(Ab) == min(Ab.shape)
+        
+            # ☑️ C = [A b; 1] full rank
+            C = np.vstack([np.hstack([A, b]), np.ones(N+1)])
+            assert C.shape == (M+1, N+1)
+            assert np.linalg.matrix_rank(C) == min(C.shape)
+            assert np.linalg.matrix_rank(C) == C.shape[1] # column rank
 
-            print("rank of [A; b; 1]: ", np.linalg.matrix_rank(
-                np.vstack([Ab, np.ones(4)])), "\n")
+            # ☑️ C's null space is just the zero vector
+            assert scipy.linalg.null_space(C).size == 0
 
-        # enforce linear constraint Psi x = d
-        Psid = np.ones(4).reshape((1, 4)) # [Psi; d]
+            # ☑️ W [A; b]'s null space. not orthogonal to 1 like we want.
+            Ab_null = scipy.linalg.null_space(Ab)
+            assert Ab_null.size == N+1
+            assert not np.isclose(
+                np.dot(np.ravel(Ab_null), np.ones(N+1)), 0.0, atol=0.001
+            )
 
-        QR = np.linalg.qr(np.transpose(Psid), mode="complete")
-        Q2 = QR.Q[:, 1:] # basis for null space; Psid @ Q2 == 0
-        np.testing.assert_allclose(
-            (Psid @ Q2).reshape(3, 1), 
-            np.zeros(3).reshape(3, 1), atol=1e-5
-        )
+        # enforce linear constraint 1^T x = 1
+        O = np.ones(N+1).reshape((1, N+1)) # [1^T; 1]
 
-        # new augmented matrix
-        C = Ab @ Q2 @ np.transpose(Q2)
-        if verbose:
-            print("rank of [A b] Q2 Q2': ", np.linalg.matrix_rank(C))
-            print("size of [A b] Q2 Q2': ", C.shape)
-        assert C.shape == (3, 4)
+        QR = np.linalg.qr(np.transpose(O), mode="complete")
+        Q2 = QR.Q[:, 1:] # basis for null space of O
+        if run_checks:
+            # ☑️ size of Q, Q2, R
+            assert QR.Q.shape == (N+1, N+1)
+            assert Q2.shape == (N+1, N)
+            assert QR.R.shape == (N+1, 1)
+        
+            # ☑️ first column of Q is just the one vector
+            assert np.allclose(
+                -1 * QR.Q[:, 0], # direction doesn't matter
+                np.ones(N+1) / np.sqrt(N+1)
+            )
+
+            # ☑️ vectors in cols of Q2 = vectors in null space of O
+            assert np.allclose(
+                np.ravel(O @ Q2), np.zeros(N), atol=1e-5
+            )
+
+        # component of augmented matrix that matters, [A b] Q2 Q2'
+        AbQ2Q2T = Ab @ Q2 @ np.transpose(Q2)
+        if run_checks:
+            # ☑️ size of W [A b] Q2 Q2'
+            assert AbQ2Q2T.shape == (M, N+1)
+        
+            # ☑️ W [A b] Q2 Q2' is full rank
+            assert np.linalg.matrix_rank(AbQ2Q2T) == min(AbQ2Q2T.shape)
+        
+            # ☑️ W [A b] Q2 Q2' null space. right now, just 1 cuz Q2' 1 = 0.
+            # so there isn't a null vector z = Q2 y
+            assert np.allclose(
+                np.ravel(scipy.linalg.null_space(AbQ2Q2T)),
+                np.ones(M+1) / np.sqrt(N+1)
+            )
+        
+            # ☑️ W [A b] Q2 full column rank and no null space.
+            # i.e. total peturbation of zero does not work.
+            assert scipy.linalg.null_space(Ab @ Q2).size == 0
+            assert np.linalg.matrix_rank(Ab @ Q2) == (Ab @ Q2).shape[1]
+            assert scipy.linalg.null_space(
+                Ab @ Q2 @ np.transpose(Q2) @ Q2
+            ).size == 0
 
         # SVD of [A; b] Q2 Q2'
-        f = np.linalg.svd(C, full_matrices=True)
-        if verbose:
+        f = np.linalg.svd(AbQ2Q2T, full_matrices=True)
+        if run_checks:
+            assert AbQ2Q2T.shape == (M, N+1)
+            assert f.Vh.shape == (N+1, N+1)
+            assert f.U.shape == (M, M)
+            assert np.linalg.matrix_rank(AbQ2Q2T) == N
+            # assert np.isclose(f.S[-1], 0.0)
+            print("SVs not right inn paper!")
             print("SVs of [A b] Q2 Q2': ", f.S, "\n")
 
         # n + 1 - p = 3 + 1 - 1 = 3rd singular vector.
@@ -496,14 +555,14 @@ def _(W, build_linear_problem, np):
 
         # corrections
         delta_Ab = f.S[2] * f.U[:, 2].reshape(3, 1) @ f.Vh[2, :].reshape(1, 4)
-        if verbose:
-            print("shape of [A b] Q2 Q2' Q2: ", (C @ Q2).shape)
-            print("SVs of [A b] Q2 Q2' Q2: ", np.linalg.svd(
-                C @ Q2, full_matrices=True).S, "\n")
-            print("SVs of ([A b] Q2 Q2'- Delta) Q2: ", np.linalg.svd(
-                (C - delta_Ab) @ Q2, full_matrices=True).S)
-            print("rank of [[A; b] - Delta; 1]: ", np.linalg.matrix_rank(
-                np.vstack([Ab - delta_Ab, np.ones(4)])), "\n")
+        # if verbose:
+        #     print("shape of [A b] Q2 Q2' Q2: ", (C @ Q2).shape)
+        #     print("SVs of [A b] Q2 Q2' Q2: ", np.linalg.svd(
+        #         C @ Q2, full_matrices=True).S, "\n")
+        #     print("SVs of ([A b] Q2 Q2'- Delta) Q2: ", np.linalg.svd(
+        #         (C - delta_Ab) @ Q2, full_matrices=True).S)
+        #     print("rank of [[A; b] - Delta; 1]: ", np.linalg.matrix_rank(
+        #         np.vstack([Ab - delta_Ab, np.ones(4)])), "\n")
 
         # unscale
         if scale_by_W:
@@ -514,8 +573,9 @@ def _(W, build_linear_problem, np):
             x_tls[x_tls < 0.0] = 0.0
             x_tls = x_tls / np.sum(x_tls)
 
-        if try_new:
-            return Ab @ Q2 @ np.transpose(Q2)
+        if run_checks:
+            # ☑️ sum to one constraint satisfied
+            assert np.isclose(np.sum(x_tls), 1.0)
 
         return x_tls, delta_Ab
 
@@ -525,7 +585,8 @@ def _(W, build_linear_problem, np):
 @app.cell
 def _(blend_features, blend_id, constrained_tls_soln, pure_features):
     constrained_tls_soln(
-        pure_features, blend_features, blend_id, verbose=True, scale_by_W=False
+        pure_features, blend_features, blend_id, 
+        verbose=True, scale_by_W=True, run_checks=True
     )
     return
 
@@ -542,14 +603,8 @@ def _(blend_features, blend_id, constrained_tls_soln, pure_features):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ☑️ sum to one constraint satisfied.
+ 
     """)
-    return
-
-
-@app.cell
-def _(np, x_tls):
-    assert np.isclose(np.sum(x_tls), 1.0)
     return
 
 
@@ -626,9 +681,8 @@ def _(mo):
 
 
 @app.cell
-def _(A, b, np):
-    Ab_ones = np.vstack([np.hstack([A, b]), np.ones(4)])
-    assert np.linalg.matrix_rank(Ab_ones) == 4
+def _(Ab_ones, np):
+
     print("singular values of [Ab; 1]: ", np.linalg.svd(Ab_ones).S) # smallest not zero
     Ab_ones
     return
@@ -821,19 +875,15 @@ def _(constrained_tls_soln, perturb_data):
     return (sample_perturbed_solutions,)
 
 
-@app.cell
-def _(
-    blend_features,
-    blend_id,
-    pure_features,
-    sample_perturbed_solutions,
-    sigmas,
-):
-    perturbed_x_tlss = sample_perturbed_solutions(
+app._unparsable_cell(
+    r"""
+    # perturbed_x_tlss = sample_perturbed_solutions(
         pure_features, blend_features, sigmas, blend_id
     )
     perturbed_x_tlss
-    return (perturbed_x_tlss,)
+    """,
+    name="_"
+)
 
 
 @app.cell(hide_code=True)
