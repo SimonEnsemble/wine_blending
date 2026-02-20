@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.19.11"
 app = marimo.App()
 
 
@@ -306,6 +306,7 @@ def _(plt, wine_to_color, wines):
         if savename:
             plt.savefig(blend_text + ".pdf", format="pdf", bbox_inches="tight")
         plt.show()
+
     return (viz_makeup_pie,)
 
 
@@ -362,6 +363,7 @@ def _(features, np, wines):
         b = blend_features.loc[blend_id, features].values.reshape((3, 1))
 
         return A, b
+
     return (build_linear_problem,)
 
 
@@ -411,6 +413,7 @@ def _(W, features, np):
         x_j = W @ pure_features.loc[wine_b, features].values
         cos_theta = np.dot(x_i, x_j) / (np.linalg.norm(x_i) * np.linalg.norm(x_j))
         return np.acos(cos_theta) * 180 / np.pi
+
     return (fingerprint_angles,)
 
 
@@ -443,7 +446,8 @@ def _(mo):
 @app.cell
 def _(W, build_linear_problem, np):
     def constrained_tls_soln(
-        pure_features, blend_features, blend_id, verbose=False, scale_by_W=True
+        pure_features, blend_features, blend_id, 
+        verbose=False, scale_by_W=True, try_new=False
     ):
         A, b = build_linear_problem(pure_features, blend_features, blend_id)
 
@@ -510,7 +514,11 @@ def _(W, build_linear_problem, np):
             x_tls[x_tls < 0.0] = 0.0
             x_tls = x_tls / np.sum(x_tls)
 
+        if try_new:
+            return Ab @ Q2 @ np.transpose(Q2)
+
         return x_tls, delta_Ab
+
     return (constrained_tls_soln,)
 
 
@@ -534,6 +542,20 @@ def _(blend_features, blend_id, constrained_tls_soln, pure_features):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ☑️ sum to one constraint satisfied.
+    """)
+    return
+
+
+@app.cell
+def _(np, x_tls):
+    assert np.isclose(np.sum(x_tls), 1.0)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ☑️  null space of W [A ; b] is related to the naive solution to Ax = b which doesn't satisfy the constraint.
     """)
     return
@@ -543,6 +565,7 @@ def _(mo):
 def _(A, W, b, np, scipy, x_naive):
     _z = scipy.linalg.null_space(W @ np.hstack([A, b]))
     _x_null = -(_z / _z[-1])[:3]
+    assert not np.isclose(np.sum(_x_null), 1, atol=0.005)
     assert np.allclose(_x_null, x_naive)
     return
 
@@ -573,7 +596,7 @@ def _(x_tls):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ☑️ directly check perturbed problem.
+    ☑️ directly check perturbed problem is solved by TLS solution
     """)
     return
 
@@ -606,7 +629,7 @@ def _(mo):
 def _(A, b, np):
     Ab_ones = np.vstack([np.hstack([A, b]), np.ones(4)])
     assert np.linalg.matrix_rank(Ab_ones) == 4
-    print("singular values of [Ab; 1]: ", np.linalg.svd(Ab_ones).S)
+    print("singular values of [Ab; 1]: ", np.linalg.svd(Ab_ones).S) # smallest not zero
     Ab_ones
     return
 
@@ -655,14 +678,76 @@ def _(A, W, b, np):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## uncertainty quantification
+    ☑️ $Q_2Q_2^\intercal$ rank.
     """)
     return
 
 
 @app.cell
-def _(W):
-    W
+def _(np):
+    _Q2 = np.linalg.qr(np.ones(4).reshape((4, 1)), mode="complete").Q[:, 1:]
+    print("size: Q2 Q2T", np.shape(_Q2 @ np.transpose(_Q2)))
+    print("rank: Q2 Q2T", np.linalg.matrix_rank(_Q2 @ np.transpose(_Q2)))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ☑️ can't stop at SVD of W [A b].
+    """)
+    return
+
+
+@app.cell
+def _(A, W, b, np, scipy):
+    _WAb = W @ np.hstack([A, b])
+    print("current rank: ", np.linalg.matrix_rank(_WAb))
+    _f = np.linalg.svd(_WAb, full_matrices=True)
+    _u2 = np.reshape(_f.U[:, 2], (3, 1))
+    _v2T = np.reshape(_f.Vh[2, :], (1, 4))
+    _Wdelta_AB = _f.S[2] * _u2 @ _v2T
+    _WAb_new = _WAb - _Wdelta_AB
+    print("new rank: ", np.linalg.matrix_rank(_WAb_new))
+    # _Q2 = np.linalg.qr(np.ones(4).reshape((4, 1)), mode="complete").Q[:, 1:]
+    print("norm delta: ", np.linalg.norm(_Wdelta_AB))
+    _WAb1 = np.vstack((_WAb_new, np.ones(4)))
+    _z = scipy.linalg.null_space(_WAb1)
+    _z = -_z / _z[-1]
+    _x = _z[:3]
+    _x
+    return
+
+
+@app.cell
+def _(A, W, b, np, scipy):
+    _WAb = W @ np.hstack([A, b])
+    print("rank of W [A b] :", np.linalg.matrix_rank(_WAb))
+    _Q2 = np.linalg.qr(np.ones(4).reshape((4, 1)), mode="complete").Q[:, 1:]
+    _WAbQ2Q2T = _WAb @ _Q2 @ np.transpose(_Q2)
+    print("shape of W [A b] Q2 Q2T :", np.shape(_WAbQ2Q2T))
+    print("rank of W [A b] Q2 Q2T :", np.linalg.matrix_rank(_WAbQ2Q2T))
+    # null space isn't in direction...
+    scipy.linalg.null_space(_WAbQ2Q2T)
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _(W, delta_Ab, np):
+    np.linalg.norm(W @ delta_Ab) # way smaller
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## uncertainty quantification
+    """)
     return
 
 
@@ -695,6 +780,7 @@ def _(features, n_blends, n_wines, np):
         )
 
         return new_pure_features, new_blend_features
+
     return (perturb_data,)
 
 
@@ -731,6 +817,7 @@ def _(constrained_tls_soln, perturb_data):
             x_tlss.append(x_tls)
 
         return x_tlss
+
     return (sample_perturbed_solutions,)
 
 
@@ -1047,6 +1134,7 @@ def _(build_linear_problem, n_blends, np):
         # TODO
 
         return AB
+
     return (constrained_tls_soln_all,)
 
 
