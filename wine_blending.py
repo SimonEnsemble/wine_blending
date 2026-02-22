@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.17.6"
+__generated_with = "0.19.11"
 app = marimo.App()
 
 
@@ -308,6 +308,7 @@ def _(plt, wine_to_color, wines):
         if savename:
             plt.savefig(blend_text + ".pdf", format="pdf", bbox_inches="tight")
         plt.show()
+
     return (viz_makeup_pie,)
 
 
@@ -364,6 +365,7 @@ def _(features, np, wines):
         b = blend_features.loc[blend_id, features].values.reshape((3, 1))
 
         return A, b
+
     return (build_linear_problem,)
 
 
@@ -371,7 +373,7 @@ def _(features, np, wines):
 def _(blend_features, blend_id, build_linear_problem, pure_features):
     A, b = build_linear_problem(pure_features, blend_features, blend_id)
     A, b
-    return A, b
+    return (b,)
 
 
 @app.cell(hide_code=True)
@@ -397,6 +399,7 @@ def _(W, features, np):
         x_j = W @ pure_features.loc[wine_b, features].values
         cos_theta = np.dot(x_i, x_j) / (np.linalg.norm(x_i) * np.linalg.norm(x_j))
         return np.acos(cos_theta) * 180 / np.pi
+
     return (fingerprint_angles,)
 
 
@@ -430,7 +433,7 @@ def _(mo):
 def _(W, build_linear_problem, np, scipy):
     def constrained_tls_soln(
         pure_features, blend_features, blend_id, 
-        verbose=False, run_checks=False
+        verbose=False, run_checks=False, use_naive_method=False
     ):
         # W pulled from outside.
         A, b = build_linear_problem(pure_features, blend_features, blend_id)
@@ -444,6 +447,17 @@ def _(W, build_linear_problem, np, scipy):
         # case M+1 > N
         M = pure_features.shape[1] # number of constituents
         N = pure_features.shape[0] # number of parent mixtures
+
+        if use_naive_method:
+            if M == N:
+                x = np.linalg.solve(A, b)
+                if run_checks:
+                    print("sum xi naive: ", np.sum(x))
+                    assert not np.isclose(np.sum(x), 1.0, atol=0.005)
+                x = x / np.sum(x)
+
+                delta_Ab = np.zeros((M, N+1))
+                return x, delta_Ab
 
         if run_checks:
             # ☑️ [A b] full rank
@@ -466,6 +480,13 @@ def _(W, build_linear_problem, np, scipy):
                 # but not in direction we want
                 assert not np.isclose(
                     np.dot(np.ravel(WAb_null), np.ones(N+1)), 0.0, atol=0.001
+                )
+                # null space here is just solution to Ax = b! so
+                #  just saying, if we naively do A x = b, x is not gonna
+                #  satisfy the sum to one constraint
+                x_naive = np.linalg.solve(A, b)
+                assert np.allclose(
+                    x_naive, - WAb_null[:3] / WAb_null[3]
                 )
             else:
                 assert WAb_null.size == 0
@@ -549,6 +570,18 @@ def _(W, build_linear_problem, np, scipy):
         # unscale
         delta_Ab = np.linalg.inv(W) @ Wdelta_Ab
 
+        if run_checks:
+            # ☑️ could just focus on W [A b] Q2
+            assert np.isclose(
+                np.linalg.norm(delta_Ab, 'fro'), 
+                np.linalg.norm(delta_Ab @ Q2, 'fro')
+            )
+            # ☑️ [dA db] perp to one i.e. [dA dB] Q1 = 0
+            assert np.allclose(
+                delta_Ab @ np.ones((N+1, 1)),
+                np.zeros((M, 1))
+            )
+
         # make physical
         if np.any(x_tls < 0.0):
             x_tls[x_tls < 0.0] = 0.0
@@ -578,6 +611,7 @@ def _(W, build_linear_problem, np, scipy):
                 assert np.allclose(x_tls_w_perturb, x_tls, atol=0.000001)
 
         return np.ravel(x_tls), delta_Ab
+
     return (constrained_tls_soln,)
 
 
@@ -614,22 +648,17 @@ def _(mo):
 
 
 @app.cell
-def _(A, b, np):
-    x_naive = np.linalg.solve(A, b)
-    assert not np.isclose(np.sum(x_naive), 1.0, atol=0.001)
-    print("sum of vol fracs: ", np.sum(x_naive))
+def _(blend_features, blend_id, constrained_tls_soln, pure_features):
+    x_naive, _ = constrained_tls_soln(
+        pure_features, blend_features, blend_id, 
+        run_checks=True, use_naive_method=True
+    )
     return (x_naive,)
 
 
 @app.cell
 def _(np, x_naive, x_tls):
     x_tls - np.ravel(x_naive)
-    return
-
-
-@app.cell
-def _(np, x_naive, x_tls):
-    x_tls - np.ravel(x_naive) / np.sum(x_naive)
     return
 
 
@@ -670,6 +699,7 @@ def _(features, n_blends, n_wines, np):
         )
 
         return new_pure_features, new_blend_features
+
     return (perturb_data,)
 
 
@@ -691,7 +721,8 @@ def _(blend_features, np, perturb_data, pure_features, sigmas):
 @app.cell
 def _(constrained_tls_soln, perturb_data):
     def sample_perturbed_solutions(
-        pure_features, blend_features, sigmas, blend_id, n_samples=100
+        pure_features, blend_features, sigmas, blend_id, 
+        n_samples=100, use_naive_method=False
     ):
         x_tlss = []
 
@@ -699,13 +730,15 @@ def _(constrained_tls_soln, perturb_data):
             new_pure_features, new_blend_features = perturb_data(
                 pure_features, blend_features, sigmas
             )
-
+    
             x_tls, _ = constrained_tls_soln(
-                new_pure_features, new_blend_features, blend_id
+                new_pure_features, new_blend_features, blend_id,
+                use_naive_method=use_naive_method
             )
             x_tlss.append(x_tls)
 
         return x_tlss
+
     return (sample_perturbed_solutions,)
 
 
@@ -836,7 +869,8 @@ def _(
         ###
         x_tlss = sample_perturbed_solutions(
             pure_features, blend_features, sigmas, _blend_id, 
-            n_samples=1000 if checkbox_kde.value else 100
+            n_samples=1000 if checkbox_kde.value else 100,
+            use_naive_method=False
         )
         x_UQ = np.std(perturbed_x_tlss, axis=0)
 
@@ -861,7 +895,7 @@ def _(
             for s in range(len(x_tlss)):
                 ax.scatter(
                     [x_tlss[s][0]], [x_tlss[s][1]], [x_tlss[s][2]],
-                    marker="^", color=wine_to_color[_blend_id], alpha=0.1,
+                    marker="o", color=wine_to_color[_blend_id], alpha=0.1,
                     s=markersize ** 2
                 )
 
@@ -883,7 +917,7 @@ def _(
             pure_features, blend_features, _blend_id
         )
         print(f"blend {_blend_id} TLS:")
-    
+
         for (_w, _wine) in enumerate(wines):
             print(f"\t\t{_wine}: {_x_tls[_w]:.2f} vol % +/- {x_UQ[_w]:.2f} vol. %")
         # errors
@@ -1023,6 +1057,7 @@ def _(build_linear_problem, n_blends, np):
         # TODO
 
         return AB
+
     return (constrained_tls_soln_all,)
 
 
