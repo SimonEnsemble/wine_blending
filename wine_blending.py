@@ -588,13 +588,15 @@ def _(W, build_linear_problem, np, scipy):
     return (constrained_tls_soln,)
 
 
-@app.cell
-def _(blend_features, blend_id, constrained_tls_soln, pure_features):
-    constrained_tls_soln(
+app._unparsable_cell(
+    r"""
+         constrained_tls_soln(
         pure_features, blend_features, blend_id, 
         verbose=True, run_checks=True
     )
-    return
+    """,
+    name="_"
+)
 
 
 @app.cell
