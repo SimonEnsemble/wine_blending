@@ -513,79 +513,49 @@ def _(W, build_linear_problem, np, scipy):
                 np.ravel(O @ Q2), np.zeros(N), atol=1e-5
             )
 
-        # component of augmented matrix that matters, [A b] Q2 Q2'
-        WAbQ2Q2T = WAb @ Q2 @ np.transpose(Q2)
+        # W [A b] Q2
+        WAbQ2 = WAb @ Q2
         if run_checks:
-            # ☑️ size of W [A b] Q2 Q2'
-            assert WAbQ2Q2T.shape == (M, N+1)
+            # ☑️ size of W [A b] Q2
+            assert WAbQ2.shape == (M, N)
 
-            # ☑️ W [A b] Q2 Q2' is full rank
-            assert np.linalg.matrix_rank(WAbQ2Q2T) == N
+            # ☑️ W [A b] Q2 is full [column] rank
+            assert np.linalg.matrix_rank(WAbQ2) == min(WAbQ2.shape)
+            assert np.linalg.matrix_rank(WAbQ2) == N
+        
+            # ☑️ W [A b] Q2 does not admit a null space.
+            assert scipy.linalg.null_space(WAbQ2).size == 0
 
-            # ☑️ W [A b] Q2 Q2' null space. right now, just 1 cuz Q2' 1 = 0.
-            # so there isn't a null vector z = Q2 y
-            assert np.allclose(
-                np.abs(np.ravel(scipy.linalg.null_space(WAbQ2Q2T))),
-                np.ones(N+1) / np.sqrt(N+1)
-            )
-
-            # ☑️ W [A b] Q2 full column rank and no null space.
-            # i.e. total peturbation of zero does not work.
-            assert scipy.linalg.null_space(WAb @ Q2).size == 0
-            assert np.linalg.matrix_rank(WAb @ Q2) == (WAb @ Q2).shape[1]
-            assert scipy.linalg.null_space(
-                WAb @ Q2
-            ).size == 0
-
-        # SVD of [A; b] Q2 Q2'
-        f = np.linalg.svd(WAbQ2Q2T, full_matrices=True)
+        # SVD of W [A; b] Q2
+        f = np.linalg.svd(WAbQ2, full_matrices=True)
         if run_checks:
-            assert WAbQ2Q2T.shape == (M, N+1)
-            assert f.Vh.shape == (N+1, N+1)
+            assert WAbQ2.shape == (M, N)
+            assert f.Vh.shape == (N, N)
             assert f.U.shape == (M, M)
-            assert np.linalg.matrix_rank(WAbQ2Q2T) == N
-            if M == N:
-                assert f.S[-1] > 0.0
-                assert np.size(f.S) == N
-            else:
-                assert np.isclose(f.S[-1], 0.0)
-                assert np.size(f.S) == N+1
+            assert f.S[-1] > 0.0
 
         # Nth singular vectors (N-1 in Python)
         sigma_n = f.S[N-1]
         u_n = f.U[:, N-1].reshape(M, 1)
-        v_n = f.Vh[N-1, :].reshape(N+1, 1)
+        v_n = f.Vh[N-1, :].reshape(N, 1)
 
         # total least squares solution
-        z = -v_n / v_n[N]
-        x_tls = z[:N]
+        z = Q2 @ v_n
+        x_tls = -z[:N] / z[-1]
 
         if run_checks:
             # ☑️ z orthogonal to 1
             assert np.isclose(np.dot(np.ravel(z), np.ones(N+1)), 0.0)
 
         # total perturbation
-        Wdelta_Ab = sigma_n * u_n @ np.transpose(v_n)
-
-        # unscale
-        delta_Ab = np.linalg.inv(W) @ Wdelta_Ab
+        delta_Ab = sigma_n * np.linalg.inv(W) @  u_n @ np.transpose(Q2 @ v_n)
 
         if run_checks:
-            # ☑️ could just focus on W [A b] Q2
-            assert np.isclose(
-                np.linalg.norm(delta_Ab, 'fro'), 
-                np.linalg.norm(delta_Ab @ Q2, 'fro')
-            )
             # ☑️ [dA db] perp to one i.e. [dA dB] Q1 = 0
             assert np.allclose(
                 delta_Ab @ np.ones((N+1, 1)),
                 np.zeros((M, 1))
             )
-
-        # make physical
-        if np.any(x_tls < 0.0):
-            x_tls[x_tls < 0.0] = 0.0
-            x_tls = x_tls / np.sum(x_tls)
 
         if run_checks:
             # ☑️ sum to one constraint satisfied
@@ -598,9 +568,6 @@ def _(W, build_linear_problem, np, scipy):
             assert np.allclose(
                 x_tls, z_alt[:N]
             )
-            z_alt2 = scipy.linalg.null_space(WAb - Wdelta_Ab)
-            z_alt2 = -z_alt2 / z_alt2[-1] # normalize
-            assert np.allclose(z_alt, z_alt2)
 
             # ☑️ does optimal total perturbation give Ax = b
             #    a solution that satisfies constraint?
@@ -609,6 +576,12 @@ def _(W, build_linear_problem, np, scipy):
                     A - delta_Ab[:, :N], b - delta_Ab[:, N].reshape(M, 1)
                 )
                 assert np.allclose(x_tls_w_perturb, x_tls, atol=0.000001)
+
+        # make physical
+        if np.any(x_tls < 0.0):
+            x_tls[x_tls < 0.0] = 0.0
+            x_tls[x_tls > 1.0] = 1.0
+            x_tls = x_tls / np.sum(x_tls)
 
         return np.ravel(x_tls), delta_Ab
 
