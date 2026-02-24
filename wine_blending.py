@@ -415,6 +415,7 @@ def _(
         blend_fprints.loc[blend_selector.value],
         sigmas
     )
+    blending_prob
     return (blending_prob,)
 
 
@@ -423,6 +424,7 @@ def _(np):
     def build_linear_system(blending_prob):
         wines = blending_prob.pure_variety_fprints.index
         constituents = blending_prob.pure_variety_fprints.columns
+    
         M = len(constituents)
         N = len(wines)
 
@@ -432,8 +434,11 @@ def _(np):
         sigma_bar = np.mean(
             [blending_prob.sigmas[constituent] for constituent in constituents]
         )
-        W = sigma_bar * np.diag(
-            [blending_prob.sigmas[constituent] for constituent in constituents]
+        W = np.diag(
+            [
+                sigma_bar / blending_prob.sigmas[constituent] 
+                for constituent in constituents
+            ]
         )
 
         assert A.shape == (M, N)
@@ -608,24 +613,38 @@ def _(build_linear_system, np, scipy):
                 assert np.allclose(x_tls_w_perturb, x_tls, atol=0.000001)
 
         # make physical
-        if np.any(x_tls < 0.0):
-            if run_checks:
-                print("manually fixing x to be in [0, 1]")
-            x_tls[x_tls < 0.0] = 0.0
-            x_tls[x_tls > 1.0] = 1.0
-            x_tls = x_tls / np.sum(x_tls)
+        # if np.any(x_tls < 0.0):
+        #     # eliminate the wine with the negative volume fraction
+        #     id_wine_eliminate = np.argmin(x_tls)
+        #     wines = blending_prob.pure_variety_fprints.index
+        #     new_wines = [
+        #         wine for wine in wines if wine != wines[id_wine_eliminate]
+        #     ]
+        #     print("eliminating wine: ", wines)
+
+        #     # new blending problem
+        #     new_blending_prob = WineBlendingProb(
+        #         blending_prob.pure_variety_fprints.loc[new_wines, :], 
+        #         blending_prob.blend_fprint, 
+        #         blending_prob.sigmas
+        #     )
+        
+        #     # run on reduced TLS problem
+        #     x_tls, delta_Ab = constrained_tls_soln(
+        #         new_blending_prob, verbose=verbose, run_checks=run_checks
+        #     )
+        #     return x_tls, delta_Ab 
+        
+            # new_wines = [wine for wine in wines if ]
+            # if run_checks:
+            #     print("manually fixing x to be in [0, 1]")
+            # x_tls[x_tls < 0.0] = 0.0
+            # x_tls[x_tls > 1.0] = 1.0
+            # x_tls = x_tls / np.sum(x_tls)
 
         return np.ravel(x_tls), delta_Ab
 
     return (constrained_tls_soln,)
-
-
-@app.cell
-def _(np):
-    x = np.array([-0.1, 0.8, 0.2])
-    np.any(x < 0.0)
-    np.argmin(x)
-    return
 
 
 @app.cell
@@ -635,6 +654,18 @@ def _(blending_prob, constrained_tls_soln):
     )
     x_tls, delta_Ab
     return delta_Ab, x_tls
+
+
+@app.cell
+def _(blending_prob):
+    blending_prob
+    return
+
+
+@app.cell
+def _(blending_prob):
+    blending_prob
+    return
 
 
 @app.cell(hide_code=True)
