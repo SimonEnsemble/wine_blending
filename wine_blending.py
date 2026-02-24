@@ -29,6 +29,7 @@ def _():
     return (
         Line2D,
         MultipleLocator,
+        dataclass,
         get_triangular_grid,
         mcolors,
         mo,
@@ -78,156 +79,238 @@ def _(mo):
 
     ## data
 
-    ### features of the pure wine varieties
+    ### chemical fingerprints of the pure-variety wines
     """)
     return
 
 
 @app.cell
 def _(np, pd):
-    wines = ["Cab. Sauv.", "Merlot", "Cab. Franc"]
-    n_wines = len(wines)
+    _wines = ["Cab. Sauv.", "Merlot", "Cab. Franc"]
 
-    _pure_features_1 = pd.DataFrame(
+    _pv_fprints_1 = pd.DataFrame(
         {
             "alcohol [vol. %]": [12.96, 13.20, 14.35],
             "sugar [g/L]": [4.51,  3.12,  2.44],
             "acid [g/L]": [5.6,  6.08,  5.41]
         },
-        index=wines
+        index=_wines
     ) # day 1
 
-    _pure_features_2 = pd.DataFrame(
+    _pv_fprints_2 = pd.DataFrame(
         {
             "alcohol [vol. %]": [12.89, 13.125, 14.225],
             "sugar [g/L]": [4.58,  3.11,  2.47],
             "acid [g/L]": [5.71,  5.87,  5.33]
         },
-        index=wines
+        index=_wines
     ) # day 2
 
-    pure_features = (_pure_features_1 + _pure_features_2) / 2
-
-    features = pure_features.columns
+    pure_variety_fprints = (_pv_fprints_1 + _pv_fprints_2) / 2
 
     # calculate std over the two days for the sigmas
     sigmas = {}
     trust_factor = 1.1 # inflate to account for bias
-    for _feature in features:
+    for _feature in pure_variety_fprints.columns:
         sigmas[_feature] = np.zeros(3)
-        for (_w, _wine) in enumerate(wines):
+        for (_w, _wine) in enumerate(_wines):
             sigmas[_feature][_w] = np.std(
                 [
-                    _pure_features_1.loc[_wine, _feature], 
-                    _pure_features_2.loc[_wine, _feature]
+                    _pv_fprints_1.loc[_wine, _feature], 
+                    _pv_fprints_2.loc[_wine, _feature]
                 ]
             ) * trust_factor
 
         sigmas[_feature] = np.mean(sigmas[_feature])
 
-    pure_features
-    return features, n_wines, pure_features, sigmas, wines
+    # mean std
+    sigma_bar = np.mean(
+        [
+            sigmas[constituent] 
+            for constituent in pure_variety_fprints.columns
+        ]
+    )
+    return pure_variety_fprints, sigmas
 
 
-@app.cell
-def _(sigmas):
-    sigmas
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### 🤔 direction of chemical fingerprints
+
+    this could explain anisotropy in UQ.
+    """)
     return
 
 
 @app.cell
-def _(features, np, sigmas):
-    # mean std
-    sigma_bar = np.mean([sigmas[feature] for feature in features])
-    sigma_bar
-    return (sigma_bar,)
+def _(np):
+    def fingerprint_angles(
+        pv_fprints, wine_a, wine_b, sigmas
+    ):
+        constituents = pv_fprints.columns
+
+        x_a = np.array(
+            [
+                sigmas[constituent] * pv_fprints.loc[wine_a, constituent]
+                for constituent in constituents
+            ]
+        )
+        x_b = np.array(
+            [
+                sigmas[constituent] * pv_fprints.loc[wine_b, constituent]
+                for constituent in constituents
+            ]
+        )
+        cos_theta = np.dot(x_a, x_b) / (
+            np.linalg.norm(x_a) * np.linalg.norm(x_b)
+        )
+        return np.acos(cos_theta) * 180 / np.pi
+
+    return (fingerprint_angles,)
 
 
 @app.cell
-def _(features, np, sigma_bar, sigmas):
-    # weight matrix
-    W = np.diag([sigma_bar / sigmas[feature] for feature in features])
-    W
-    return (W,)
+def _(fingerprint_angles, pure_variety_fprints, sigmas):
+    fingerprint_angles(
+        pure_variety_fprints, "Cab. Sauv.", "Merlot", sigmas
+    )
+    return
 
 
 @app.cell
-def _(W):
-    W
+def _(fingerprint_angles, pure_variety_fprints, sigmas):
+    fingerprint_angles(
+        pure_variety_fprints, "Cab. Sauv.", "Cab. Franc", sigmas
+    )
+    return
+
+
+@app.cell
+def _(fingerprint_angles, pure_variety_fprints, sigmas):
+    fingerprint_angles(
+        pure_variety_fprints, "Merlot", "Cab. Franc", sigmas
+    )
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    checkbox = mo.ui.checkbox(label="include blends?")
-    checkbox
-    return (checkbox,)
+    mo.md(r"""
+    ### chemical fprints of the blends
+    """)
+    return
 
 
 @app.cell
-def _(checkbox):
-    include_blends = checkbox.value
-    return (include_blends,)
+def _(pd):
+    blend_fprints = pd.DataFrame(
+        {
+            "alcohol [vol. %]": [13.37, 13.19, 13.18, 12.975],
+            "sugar [g/L]": [3.1, 3.97, 3.4, 4.0],
+            "acid [g/L]": [5.73, 5.56, 5.69, 5.63]
+        }
+    )
+    blend_fprints
+    return (blend_fprints,)
+
+
+@app.cell
+def _(blend_fprints, pure_variety_fprints):
+    # blend features should be within range of parent pure variety wines
+    for _constituent in blend_fprints.columns:
+        max_conc = pure_variety_fprints[_constituent].max()
+        min_conc = pure_variety_fprints[_constituent].min()
+
+        for _b in range(blend_fprints.shape[0]):
+            conc_blend = blend_fprints.loc[_b, _constituent]
+            assert conc_blend <= max_conc
+            assert conc_blend >= min_conc
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### ::lucide:eye:: visualize the fprints
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    incl_blends_checkbox = mo.ui.checkbox(label="include blends?")
+    incl_blends_checkbox
+    return (incl_blends_checkbox,)
 
 
 @app.cell
 def _(
-    blend_features,
-    features,
-    include_blends,
-    n_blends,
-    n_wines,
+    blend_fprints,
+    incl_blends_checkbox,
     plt,
-    pure_features,
+    pure_variety_fprints,
     wine_to_color,
-    wines,
 ):
     def _draw_lollipop(ax, x, y, color):
         ax.plot([x, x], [0, y], color=color, zorder=100)
         ax.scatter([x], [y], color=color, zorder=100, s=8**2)
 
-    def viz_features(pure_features, blend_features):
+    def viz_features(pure_variety_fprints, blend_fprints):
+        wines = pure_variety_fprints.index
+        n_wines = len(wines)
+        constituents = pure_variety_fprints.columns
+        if incl_blends_checkbox.value:
+            n_blends = blend_fprints.shape[0]
+        else:
+            n_blends = 0
+
         figsize = [6.4, 4.8]
-        if include_blends:
+        if incl_blends_checkbox.value:
             figsize[0] *= 1.1
 
         fig, axs = plt.subplots(1, 3, figsize=figsize)
-        # loop over features
-        for f, feature in enumerate(features):
-            # loop over wines
-            for w, wine in enumerate(wines):
-                feature_val = pure_features.loc[wine, feature]
-                _draw_lollipop(axs[f], w, feature_val, wine_to_color[wine])
 
-            if include_blends:
+        for c, constituent in enumerate(constituents):
+            for w, wine in enumerate(wines):
+                conc = pure_variety_fprints.loc[wine, constituent]
+                _draw_lollipop(axs[c], w, conc, wine_to_color[wine])
+
+            xticks = list(range(n_wines))
+            xticklabels = list(wines)
+            xmax = n_wines - 0.5
+
+            if incl_blends_checkbox.value:
                 d = 1 # spacing
                 for blend_id in range(n_blends):
-                    feature_val = blend_features.loc[blend_id, feature]
+                    conc = blend_fprints.loc[blend_id, constituent]
                     _draw_lollipop(
-                        axs[f], 
-                        n_wines + blend_id + d, feature_val, 
+                        axs[c], 
+                        n_wines + blend_id + d, conc, 
                         wine_to_color[blend_id]
                     )
 
-                axs[f].set_xticks(
-                    list(range(n_wines)) + list(range(n_wines+d, n_wines+n_blends+d)),
-                    wines + [f"blend {b+1}" for b in range(n_blends)],
-                    rotation=90
-                )
-                axs[f].set_xlim(-0.5, n_wines + n_blends + 0.5)
+                xticks = xticks + list(range(n_wines+d, n_wines+n_blends+d))
+                xticklabels = xticklabels + [
+                    f"blend {b+1}" for b in range(n_blends)
+                ]
 
-                axs[f].axvspan(
-                    n_wines+d - 0.5, n_wines+n_blends+d, color='gray', alpha=0.1, lw=0
+                # highlight blends to distinguish them
+                axs[c].axvspan(
+                    n_wines+d - 0.5, 
+                    n_wines+n_blends+d, 
+                    color='gray', alpha=0.1, lw=0
                 )
-            else:  
-                axs[f].set_xticks(range(n_wines), wines, rotation=90)
-                axs[f].set_xlim(-0.5, n_wines - 0.5)
-            axs[f].set_ylabel(feature)
-            axs[f].set_ylim(ymin=0.0)
+                xmax += n_blends + d
+
+            axs[c].set_xticks(xticks, xticklabels, rotation=90)
+            axs[c].set_xlim(-0.5, xmax)
+            axs[c].set_ylabel(constituent)
+            axs[c].set_ylim(ymin=0.0)
         plt.tight_layout()
 
         _savename = "features"
-        if include_blends:
+        if incl_blends_checkbox.value:
             _savename += "_w_blends"
         else:
             _savename += "_wo_blends"
@@ -235,73 +318,40 @@ def _(
         plt.savefig(_savename + ".pdf", format="pdf")
         return fig
 
-    viz_features(pure_features, blend_features)
+    viz_features(pure_variety_fprints, blend_fprints)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### features of the blends
+    ### ground-truth blend make-up
     """)
     return
 
 
 @app.cell
 def _(pd):
-    blend_features = pd.DataFrame(
-        {
-            "alcohol [vol. %]": [13.37, 13.19, 13.18, 12.975],
-            "sugar [g/L]": [3.1, 3.97, 3.4, 4.0],
-            "acid [g/L]": [5.73, 5.56, 5.69, 5.63]
-        }
-    )
-
-    n_blends = blend_features.shape[0]
-
-    blend_features
-    return blend_features, n_blends
-
-
-@app.cell
-def _(blend_features, features, n_blends, pure_features):
-    # blend features should be within range of parent pure variety wines
-    for _feature in features:
-        for _blend_id in range(n_blends):
-            assert blend_features.loc[_blend_id, _feature] > pure_features[_feature].min()
-            assert blend_features.loc[_blend_id, _feature] < pure_features[_feature].max()
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### ground-truth blend composition
-    """)
-    return
-
-
-@app.cell
-def _(pd):
-    blend_composition = pd.DataFrame(
+    blend_makeup = pd.DataFrame(
         {
             "Cab. Sauv.": [0.1, 0.7, 0.3, 0.6],
             "Merlot": [0.6, 0.1, 0.5, 0.4],
             "Cab. Franc": [0.3, 0.2, 0.2, 0.0]
         }
     )
-    blend_composition
-    return (blend_composition,)
+    blend_makeup
+    return (blend_makeup,)
 
 
 @app.cell
-def _(plt, wine_to_color, wines):
-    def viz_makeup_pie(blend_composition, blend_id, savename=None):
+def _(plt, wine_to_color):
+    def viz_makeup_pie(blend_makeup, blend_id, savename=None):
+        wines = blend_makeup.columns
         blend_text = f"blend {blend_id + 1}"
 
         fig, ax = plt.subplots()
         ax.pie(
-            blend_composition.loc[blend_id, wines], labels=wines, 
+            blend_makeup.loc[blend_id, wines], labels=wines, 
             colors=[wine_to_color[wine] for wine in wines]
         )
         plt.title(blend_text)
@@ -313,112 +363,92 @@ def _(plt, wine_to_color, wines):
 
 
 @app.cell
-def _(blend_composition, viz_makeup_pie):
-    viz_makeup_pie(blend_composition, 3)
+def _(blend_makeup, viz_makeup_pie):
+    viz_makeup_pie(blend_makeup, 3)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## setting up the inverse problem
-
-    *unknowns:*
-
-    * $c$: vol. fraction Cab. Sauv.
-    * $m$: vol. fraction Merlot
-    * $1-c-m$: vol. fraction Cab. Franc
-
-    *ingredient:* $f$
-
-    $f_{cs} cs + f_m m + f_{cf} cf = f_{b}$
-
-    $f_{cs} cs + f_m m + f_{cf} (1-cs-m) = f_{b}$
-
-    $(f_{cs}-f_{cf}) cs + (f_m-f_{cf}) m = f_{b}-f_{cf}$
+    ## setting up an un-mixing problem
     """)
     return
 
 
+@app.cell
+def _(dataclass, pd):
+    @dataclass
+    class WineBlendingProb:
+        pure_variety_fprints : pd.DataFrame
+        blend_fprint : pd.Series
+        sigmas : dict
+
+        def __post_init__(self):
+            # order of constiuents same
+            c1 = self.pure_variety_fprints.columns
+            c2 = self.blend_fprint.index
+            assert all(c1 == c2)
+
+    return (WineBlendingProb,)
+
+
 @app.cell(hide_code=True)
 def _(mo):
-    dropdown = mo.ui.dropdown(
+    blend_selector = mo.ui.dropdown(
         options=[0, 1, 2, 3], value=1, label="blend ID"
     )
-    dropdown
-    return (dropdown,)
+    blend_selector
+    return (blend_selector,)
 
 
 @app.cell
-def _(dropdown):
-    blend_id = dropdown.value
-    return (blend_id,)
+def _(
+    WineBlendingProb,
+    blend_fprints,
+    blend_selector,
+    pure_variety_fprints,
+    sigmas,
+):
+    blending_prob = WineBlendingProb(
+        pure_variety_fprints,
+        blend_fprints.loc[blend_selector.value],
+        sigmas
+    )
+    return (blending_prob,)
 
 
 @app.cell
-def _(features, np, wines):
-    def build_linear_problem(
-        pure_features, blend_features, blend_id
-    ):  
-        A = np.transpose(pure_features.loc[wines, features].values)
+def _(np):
+    def build_linear_system(blending_prob):
+        wines = blending_prob.pure_variety_fprints.index
+        constituents = blending_prob.pure_variety_fprints.columns
+        M = len(constituents)
+        N = len(wines)
 
-        b = blend_features.loc[blend_id, features].values.reshape((3, 1))
+        A = np.transpose(blending_prob.pure_variety_fprints.values)
+        b = blending_prob.blend_fprint.values.reshape((M, 1))
 
-        return A, b
+        sigma_bar = np.mean(
+            [blending_prob.sigmas[constituent] for constituent in constituents]
+        )
+        W = sigma_bar * np.diag(
+            [blending_prob.sigmas[constituent] for constituent in constituents]
+        )
 
-    return (build_linear_problem,)
+        assert A.shape == (M, N)
+        assert W.shape == (M, M)
+
+        return W, A, b
+
+    return (build_linear_system,)
 
 
 @app.cell
-def _(blend_features, blend_id, build_linear_problem, pure_features):
-    A, b = build_linear_problem(pure_features, blend_features, blend_id)
-    A, b
+def _(blending_prob, build_linear_system):
+    W, A, b = build_linear_system(blending_prob)
+    W, A, b
     return (b,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### direction of chemical fingerprints
-
-    this could explain anisotropy in UQ.
-    """)
-    return
-
-
-@app.cell
-def _(pure_features):
-    pure_features
-    return
-
-
-@app.cell
-def _(W, features, np):
-    def fingerprint_angles(pure_features, wine_a, wine_b):
-        x_i = W @ pure_features.loc[wine_a, features].values
-        x_j = W @ pure_features.loc[wine_b, features].values
-        cos_theta = np.dot(x_i, x_j) / (np.linalg.norm(x_i) * np.linalg.norm(x_j))
-        return np.acos(cos_theta) * 180 / np.pi
-
-    return (fingerprint_angles,)
-
-
-@app.cell
-def _(fingerprint_angles, pure_features):
-    fingerprint_angles(pure_features, "Cab. Sauv.", "Merlot")
-    return
-
-
-@app.cell
-def _(fingerprint_angles, pure_features):
-    fingerprint_angles(pure_features, "Cab. Sauv.", "Cab. Franc")
-    return
-
-
-@app.cell
-def _(fingerprint_angles, pure_features):
-    fingerprint_angles(pure_features, "Cab. Franc", "Merlot")
-    return
 
 
 @app.cell(hide_code=True)
@@ -430,13 +460,13 @@ def _(mo):
 
 
 @app.cell
-def _(W, build_linear_problem, np, scipy):
+def _(build_linear_system, np, scipy):
     def constrained_tls_soln(
-        pure_features, blend_features, blend_id, 
+        blending_prob, 
         verbose=False, run_checks=False, use_naive_method=False
     ):
         # W pulled from outside.
-        A, b = build_linear_problem(pure_features, blend_features, blend_id)
+        W, A, b = build_linear_system(blending_prob)
 
         # build augmented matrix [A; b]
         Ab = np.hstack([A, b])
@@ -445,8 +475,8 @@ def _(W, build_linear_problem, np, scipy):
         WAb = W @ Ab
 
         # case M+1 > N
-        M = pure_features.shape[1] # number of constituents
-        N = pure_features.shape[0] # number of parent mixtures
+        M = blending_prob.pure_variety_fprints.shape[1] # constituents
+        N = blending_prob.pure_variety_fprints.shape[0] # parent mixtures
 
         if use_naive_method:
             if M == N:
@@ -522,7 +552,7 @@ def _(W, build_linear_problem, np, scipy):
             # ☑️ W [A b] Q2 is full [column] rank
             assert np.linalg.matrix_rank(WAbQ2) == min(WAbQ2.shape)
             assert np.linalg.matrix_rank(WAbQ2) == N
-        
+
             # ☑️ W [A b] Q2 does not admit a null space.
             assert scipy.linalg.null_space(WAbQ2).size == 0
 
@@ -579,6 +609,8 @@ def _(W, build_linear_problem, np, scipy):
 
         # make physical
         if np.any(x_tls < 0.0):
+            if run_checks:
+                print("manually fixing x to be in [0, 1]")
             x_tls[x_tls < 0.0] = 0.0
             x_tls[x_tls > 1.0] = 1.0
             x_tls = x_tls / np.sum(x_tls)
@@ -588,27 +620,18 @@ def _(W, build_linear_problem, np, scipy):
     return (constrained_tls_soln,)
 
 
-app._unparsable_cell(
-    r"""
-         constrained_tls_soln(
-        pure_features, blend_features, blend_id, 
-        verbose=True, run_checks=True
-    )
-    """,
-    name="_"
-)
-
-
 @app.cell
-def _(x_tls):
-    x_tls
+def _(np):
+    x = np.array([-0.1, 0.8, 0.2])
+    np.any(x < 0.0)
+    np.argmin(x)
     return
 
 
 @app.cell
-def _(blend_features, blend_id, constrained_tls_soln, pure_features):
+def _(blending_prob, constrained_tls_soln):
     x_tls, delta_Ab = constrained_tls_soln(
-        pure_features, blend_features, blend_id, verbose=True
+        blending_prob, verbose=True, run_checks=True
     )
     x_tls, delta_Ab
     return delta_Ab, x_tls
@@ -623,9 +646,9 @@ def _(mo):
 
 
 @app.cell
-def _(blend_features, blend_id, constrained_tls_soln, pure_features):
+def _(blending_prob, constrained_tls_soln):
     x_naive, _ = constrained_tls_soln(
-        pure_features, blend_features, blend_id, 
+        blending_prob, 
         run_checks=True, use_naive_method=True
     )
     return (x_naive,)
@@ -640,74 +663,109 @@ def _(np, x_naive, x_tls):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ### check shapes with bogus problem
+    (add another constituent "blah")
+    """)
+    return
+
+
+@app.cell
+def _(
+    WineBlendingProb,
+    blend_fprints,
+    constrained_tls_soln,
+    np,
+    pure_variety_fprints,
+    sigmas,
+):
+    bogus_pv_fprints = pure_variety_fprints.copy()
+    bogus_pv_fprints["blah [g/L]"] = np.random.rand(3)
+
+    bogus_blend_fprint = blend_fprints.loc[0].copy()
+    bogus_blend_fprint["blah [g/L]"] = np.random.rand()
+
+    bogus_sigmas = sigmas.copy()
+    bogus_sigmas["blah [g/L]"] = 1.2
+
+    bogus_blending_prob = WineBlendingProb(
+        bogus_pv_fprints, bogus_blend_fprint, bogus_sigmas
+    )
+
+    constrained_tls_soln(bogus_blending_prob, run_checks=True) # it runs checks
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## uncertainty quantification
     """)
     return
 
 
 @app.cell
-def _(pure_features):
-    pure_features
+def _(WineBlendingProb, np, sigmas):
+    def sample_perturbed_problem(blending_prob):
+        # copy these b/c we'll change them
+        pure_variety_fprints = blending_prob.pure_variety_fprints.copy()
+        blend_fprint         = blending_prob.blend_fprint.copy()
+
+        wines = pure_variety_fprints.index
+        constituents = pure_variety_fprints.columns
+
+        for constituent in constituents:
+            sigma = blending_prob.sigmas[constituent]
+
+            # perturb wine fingerprint
+            for wine in wines:
+                delta = sigma * np.random.normal()
+                pure_variety_fprints.loc[wine, constituent] += delta
+
+            # perturb blend fingerprint
+            delta = sigma * np.random.normal()
+            blend_fprint.loc[constituent] += delta
+
+        return WineBlendingProb(
+            pure_variety_fprints,
+            blend_fprint,
+            sigmas
+        )
+
+    return (sample_perturbed_problem,)
+
+
+@app.cell
+def _(blending_prob, np, sample_perturbed_problem):
+    perturbed_prob = sample_perturbed_problem(blending_prob)
+
+    # check blend fingerprint changed
+    delta_blend = perturbed_prob.blend_fprint - blending_prob.blend_fprint
+    assert delta_blend.is_unique
+    assert np.all(delta_blend.values != 0.0)
+
+    # check pure variety fingerprints changed
+    delta_pv = perturbed_prob.pure_variety_fprints.values - blending_prob.pure_variety_fprints.values
+    assert np.unique(delta_pv).size == delta_pv.size
+    assert np.all(delta_pv != 0.0)
+
+    # see perturbations; run again to see they change.
+    delta_pv, delta_blend
     return
 
 
 @app.cell
-def _(new_blend_features):
-    new_blend_features
-    return
-
-
-@app.cell
-def _(features, n_blends, n_wines, np):
-    def perturb_data(
-        pure_features, blend_features, sigmas
-    ):
-        new_pure_features = pure_features.copy()
-        new_blend_features = blend_features.copy()
-
-        for feature in features:
-            new_pure_features.loc[:, feature] += np.random.normal(
-            scale=sigmas[feature], size=(n_wines, )
-        )
-            new_blend_features.loc[:, feature] += np.random.normal(
-            scale=sigmas[feature], size=(n_blends, )
-        )
-
-        return new_pure_features, new_blend_features
-
-    return (perturb_data,)
-
-
-@app.cell
-def _(blend_features, np, perturb_data, pure_features, sigmas):
-    new_pure_features, new_blend_features = perturb_data(
-        pure_features, blend_features, sigmas
-    )
-
-    _differences_pure = np.ravel((pure_features - new_pure_features).values)
-    assert len(_differences_pure) == len(set(_differences_pure))
-    _differences_blend = np.ravel((blend_features - new_blend_features).values)
-    assert len(_differences_blend) == len(set(_differences_blend))
-
-    new_pure_features, new_blend_features
-    return (new_blend_features,)
-
-
-@app.cell
-def _(constrained_tls_soln, perturb_data):
+def _(constrained_tls_soln, sample_perturbed_problem):
     def sample_perturbed_solutions(
-        pure_features, blend_features, sigmas, blend_id, 
+        blending_prob,
         n_samples=100, use_naive_method=False
     ):
         x_tlss = []
 
         for s in range(n_samples):
-            new_pure_features, new_blend_features = perturb_data(
-                pure_features, blend_features, sigmas
-            )
-    
+            perturbed_prob = sample_perturbed_problem(blending_prob)
+
             x_tls, _ = constrained_tls_soln(
-                new_pure_features, new_blend_features, blend_id,
+                perturbed_prob,
                 use_naive_method=use_naive_method
             )
             x_tlss.append(x_tls)
@@ -718,15 +776,9 @@ def _(constrained_tls_soln, perturb_data):
 
 
 @app.cell
-def _(
-    blend_features,
-    blend_id,
-    pure_features,
-    sample_perturbed_solutions,
-    sigmas,
-):
+def _(blending_prob, sample_perturbed_solutions):
     perturbed_x_tlss = sample_perturbed_solutions(
-        pure_features, blend_features, sigmas, blend_id
+        blending_prob, n_samples=1000
     )
     perturbed_x_tlss
     return (perturbed_x_tlss,)
@@ -800,150 +852,163 @@ def _(mo):
 def _(
     Line2D,
     MultipleLocator,
-    blend_composition,
-    blend_features,
+    WineBlendingProb,
+    blend_fprints,
+    blend_makeup,
     checkbox_kde,
     constrained_tls_soln,
     do_trinary_kde,
     mcolors,
     mpl,
-    n_blends,
     np,
     perturbed_x_tlss,
     plt,
-    pure_features,
+    pure_variety_fprints,
     sample_perturbed_solutions,
     sigmas,
     wine_to_color,
-    wines,
 ):
-    all_errors = [] # for error analysis
+    def draw_simplex(
+        pure_variety_fprints, blend_fprints, sigmas
+    ):
+        wines = pure_variety_fprints.index
+        n_blends = blend_fprints.shape[0]
 
-    ax = plt.subplot(projection="ternary")
+        all_errors = [] # for error analysis
 
-    ax.set_tlabel(wines[0] + " [volume fraction]")
-    ax.set_llabel(wines[1] + " [volume fraction]")
-    ax.set_rlabel(wines[2] + " [volume fraction]")
+        ax = plt.subplot(projection="ternary")
 
-    for _ax in [ax.taxis, ax.laxis, ax.raxis]:
-        _ax.set_label_position("tick1")
-        _ax.set_major_locator(MultipleLocator(0.1))
+        ax.set_tlabel(wines[0] + " [volume fraction]")
+        ax.set_llabel(wines[1] + " [volume fraction]")
+        ax.set_rlabel(wines[2] + " [volume fraction]")
 
-    # ax.grid(which='both')
-    ax.grid(which='major', linestyle='-', alpha=0.3)
-    ax.grid(which='minor', linestyle=':', alpha=0.3)
+        for _ax in [ax.taxis, ax.laxis, ax.raxis]:
+            _ax.set_label_position("tick1")
+            _ax.set_major_locator(MultipleLocator(0.1))
 
-    markersize = 6
+        # ax.grid(which='both')
+        ax.grid(which='major', linestyle='-', alpha=0.3)
+        ax.grid(which='minor', linestyle=':', alpha=0.3)
 
-    dx_text = [[0.05, 0.0, 0.05], [0.0, 0.1, 0.0]]
+        markersize = 6
 
-    # loop over blends
-    for _blend_id in range(n_blends):
-        ###
-        #   uncertainty quantification (predictions)
-        ###
-        x_tlss = sample_perturbed_solutions(
-            pure_features, blend_features, sigmas, _blend_id, 
-            n_samples=1000 if checkbox_kde.value else 100,
-            use_naive_method=False
-        )
-        x_UQ = np.std(perturbed_x_tlss, axis=0)
+        dx_text = [[0.05, 0.0, 0.05], [0.0, 0.1, 0.0]]
 
-        if checkbox_kde.value:
-            tn0, tn1, tn2, density = do_trinary_kde(x_tlss, n=100)
-
-            # alphas = [0.9, 0.8, 0.7, 0.6]
-            N_levels = 4
-            cmap = mcolors.LinearSegmentedColormap.from_list(
-                "", ["white", wine_to_color[_blend_id]], N=N_levels+2,
-            )
-            # cmap.set_under("white", alpha=0.0)
-
-            ax.tricontour(
-                tn0, tn1, tn2, density, 
-                levels=N_levels,# [get_level(density, alpha) for alpha in alphas], 
-                cmap=cmap,
-                # extend='min'
+        # loop over blends
+        for _blend_id in range(n_blends):
+            blending_prob = WineBlendingProb(
+                pure_variety_fprints,
+                blend_fprints.loc[_blend_id],
+                sigmas
             )
 
-        else:
-            for s in range(len(x_tlss)):
-                ax.scatter(
-                    [x_tlss[s][0]], [x_tlss[s][1]], [x_tlss[s][2]],
-                    marker="o", color=wine_to_color[_blend_id], alpha=0.1,
-                    s=markersize ** 2
+            ###
+            #   uncertainty quantification (predictions)
+            ###
+            x_tlss = sample_perturbed_solutions(
+                blending_prob, 
+                n_samples=1000 if checkbox_kde.value else 100,
+                use_naive_method=False
+            )
+            x_UQ = np.std(perturbed_x_tlss, axis=0)
+
+            if checkbox_kde.value:
+                tn0, tn1, tn2, density = do_trinary_kde(x_tlss, n=100)
+
+                # alphas = [0.9, 0.8, 0.7, 0.6]
+                N_levels = 4
+                cmap = mcolors.LinearSegmentedColormap.from_list(
+                    "", ["white", wine_to_color[_blend_id]], N=N_levels+2,
+                )
+                # cmap.set_under("white", alpha=0.0)
+
+                ax.tricontour(
+                    tn0, tn1, tn2, density, 
+                    levels=N_levels,# [get_level(density, alpha) for alpha in alphas], 
+                    cmap=cmap,
+                    # extend='min'
                 )
 
-        ###
-        #   true blend composition
-        ###
-        ax.scatter(
-            [blend_composition.loc[_blend_id, wines[0]]],
-            [blend_composition.loc[_blend_id, wines[1]]],
-            [blend_composition.loc[_blend_id, wines[2]]],
-            label="truth", marker="^", facecolor=wine_to_color[_blend_id],
-            s=markersize ** 2, color="black", clip_on=False, zorder=1000
-        )
+            else:
+                for s in range(len(x_tlss)):
+                    ax.scatter(
+                        [x_tlss[s][0]], [x_tlss[s][1]], [x_tlss[s][2]],
+                        marker="o", color=wine_to_color[_blend_id], alpha=0.1,
+                        s=markersize ** 2
+                    )
 
-        ###
-        #   single predicted blend composition
-        ###
-        _x_tls, _delta_Ab = constrained_tls_soln(
-            pure_features, blend_features, _blend_id
-        )
-        print(f"blend {_blend_id} TLS:")
+            ###
+            #   true blend composition
+            ###
+            ax.scatter(
+                [blend_makeup.loc[_blend_id, wines[0]]],
+                [blend_makeup.loc[_blend_id, wines[1]]],
+                [blend_makeup.loc[_blend_id, wines[2]]],
+                label="truth", marker="^", facecolor=wine_to_color[_blend_id],
+                s=markersize ** 2, color="black", clip_on=False, zorder=1000
+            )
 
-        for (_w, _wine) in enumerate(wines):
-            print(f"\t\t{_wine}: {_x_tls[_w]:.2f} vol % +/- {x_UQ[_w]:.2f} vol. %")
-        # errors
-        errors = np.abs(_x_tls - blend_composition.loc[_blend_id, wines].values)
-        all_errors.append(errors)
-        print("\terrors = ", errors)
-        print("\tmean error: ", np.mean(errors))
+            ###
+            #   single predicted blend composition
+            ###
+            _x_tls, _delta_Ab = constrained_tls_soln(
+                blending_prob
+            )
+            print(f"blend {_blend_id} TLS:")
+
+            for (_w, _wine) in enumerate(wines):
+                print(f"\t\t{_wine}: {_x_tls[_w]:.2f} vol % +/- {x_UQ[_w]:.2f} vol. %")
+            # errors
+            errors = np.abs(_x_tls - blend_makeup.loc[_blend_id, wines].values)
+            all_errors.append(errors)
+            print("\terrors = ", errors)
+            print("\tmean error: ", np.mean(errors))
 
 
-        # ax.scatter(
-        #     [_x_tls[0]], [_x_tls[1]], [_x_tls[2]],
-        #     label="prediction", marker="^", color=wine_to_color[_blend_id],
-        #     s=markersize ** 2
-        # )
+            # ax.scatter(
+            #     [_x_tls[0]], [_x_tls[1]], [_x_tls[2]],
+            #     label="prediction", marker="^", color=wine_to_color[_blend_id],
+            #     s=markersize ** 2
+            # )
 
-    print("mean error over all blends: ", np.mean(all_errors, axis=0))
-    print("mean error over all pure-variety wines and blend: ", np.mean(all_errors))
+        print("mean error over all blends: ", np.mean(all_errors, axis=0))
+        print("mean error over all pure-variety wines and blend: ", np.mean(all_errors))
 
-    if not checkbox_kde.value:
-        ax.legend(
-            handles=[
-                Line2D([0], [0], marker='o', color='black', label='true',
-                       markersize=markersize, linestyle='None'),
-                Line2D([0], [0], marker='^', color='None', label='predicted',
-                       markersize=markersize, linestyle='None', markerfacecolor='black'),
-            ], 
-            fontsize=12
-        )
-    else:
-        patches = [
-            mpl.patches.Patch(
-                color=wine_to_color[_blend_id], 
-                label=f"{_blend_id+1}"
-            ) for _blend_id in range(n_blends)
-        ]
-        plt.legend(
-            handles=patches, title="blend", loc='upper right',
-            prop={'size': 10}, title_fontsize='small',
-            bbox_to_anchor=(1.05, 1.05)
-        )
+        if not checkbox_kde.value:
+            ax.legend(
+                handles=[
+                    Line2D([0], [0], marker='o', color='black', label='true',
+                           markersize=markersize, linestyle='None'),
+                    Line2D([0], [0], marker='^', color='None', label='predicted',
+                           markersize=markersize, linestyle='None', markerfacecolor='black'),
+                ], 
+                fontsize=12
+            )
+        else:
+            patches = [
+                mpl.patches.Patch(
+                    color=wine_to_color[_blend_id], 
+                    label=f"{_blend_id+1}"
+                ) for _blend_id in range(n_blends)
+            ]
+            plt.legend(
+                handles=patches, title="blend", loc='upper right',
+                prop={'size': 10}, title_fontsize='small',
+                bbox_to_anchor=(1.05, 1.05)
+            )
 
-    plt.tight_layout()
-    _savename = "composition_triangle"
-    if checkbox_kde.value:
-        _savename += "_kde"
-    else:
-        _savename += "_scatter"
+        plt.tight_layout()
+        _savename = "composition_triangle"
+        if checkbox_kde.value:
+            _savename += "_kde"
+        else:
+            _savename += "_scatter"
 
-    plt.savefig(_savename + ".pdf", format="pdf")
-    ax
-    return (x_tlss,)
+        plt.savefig(_savename + ".pdf", format="pdf")
+        plt.show()
+
+    draw_simplex(pure_variety_fprints, blend_fprints, sigmas)
+    return
 
 
 @app.cell(hide_code=True)
@@ -961,84 +1026,7 @@ def _(mo):
 
 
 @app.cell
-def _(np, x_tlss):
-    np.mean(x_tlss, axis=0)
-    return
-
-
-@app.cell
-def _(x_tls):
-    x_tls
-    return
-
-
-@app.cell
-def _(pure_features):
-    pure_features
-    return
-
-
-@app.cell
-def _(
-    blend_features,
-    constrained_tls_soln,
-    features,
-    n_blends,
-    np,
-    pd,
-    pure_features,
-):
-    def get_corrections(pure_features, blend_features):
-        corrections = pd.DataFrame(index=range(n_blends))
-        for feature in features:
-            corrections[feature] = np.zeros(n_blends)
-
-        for blend_id in range(n_blends):
-            x_tls, delta_Ab = constrained_tls_soln(
-                pure_features, blend_features, blend_id
-            )
-            print(delta_Ab)
-            # for f, feature in enumerate(features):
-            #     corrections.loc[blend_id, feature] = delta_Ab[f]
-
-        corrections
-
-    get_corrections(pure_features, blend_features)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## all blends at once
-    """)
-    return
-
-
-@app.cell
-def _(build_linear_problem, n_blends, np):
-    def constrained_tls_soln_all(pure_features, blend_features):
-        A = build_linear_problem(pure_features, blend_features, 0)[0]
-        bs = [
-            build_linear_problem(pure_features, blend_features, blend_id)[1] 
-            for blend_id in range(n_blends)
-        ]
-        B = np.hstack(bs)
-
-        # build augmented matrix [A; B]
-        AB = np.hstack([A, B])
-        print("shape AB: ", AB.shape)
-
-        # TODO
-
-        return AB
-
-    return (constrained_tls_soln_all,)
-
-
-@app.cell
-def _(blend_features, constrained_tls_soln_all, pure_features):
-    constrained_tls_soln_all(pure_features, blend_features)
+def _():
     return
 
 
@@ -1059,7 +1047,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## excess volume
+    ### excess volume
 
     worst-case analysis based on [data](https://en.wikipedia.org/wiki/Ethanol_(data_page)).
 
@@ -1095,21 +1083,21 @@ def _(b):
 
 
 @app.cell
-def _(pure_features):
-    pure_features["alcohol [vol. %]"].max()
+def _(pure_variety_fprints):
+    pure_variety_fprints["alcohol [vol. %]"].max()
     return
 
 
 @app.cell
-def _(pure_features):
-    pure_features["alcohol [vol. %]"].min()
+def _(pure_variety_fprints):
+    pure_variety_fprints["alcohol [vol. %]"].min()
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## checking assumptions
+    ### checking assumptions
 
     first, vapor pressure. second, excess volume using data from [here](https://chem.libretexts.org/Bookshelves/Physical_and_Theoretical_Chemistry_Textbook_Maps/Exercises%3A_Physical_and_Theoretical_Chemistry/Data-Driven_Exercises/Bartender's_Conundrum_-_Partial_Molar_Volume_in_Water-Ethanol_Mixtures).
     """)
