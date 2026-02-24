@@ -465,10 +465,27 @@ def _(mo):
 
 
 @app.cell
-def _(build_linear_system, np, scipy):
+def _(np):
+    def assert_feasible_vol_fracs(x):
+        assert np.all(x <= 1.0)
+        assert np.all(x >= 0.0)
+        assert np.isclose(np.sum(x), 1.0)
+
+    return (assert_feasible_vol_fracs,)
+
+
+@app.cell
+def _(
+    WineBlendingProb,
+    assert_feasible_vol_fracs,
+    build_linear_system,
+    np,
+    scipy,
+):
     def constrained_tls_soln(
         blending_prob, 
-        verbose=False, run_checks=False, use_naive_method=False
+        verbose=False, run_checks=False, use_naive_method=False,
+        handle_non_negativity=True
     ):
         # W pulled from outside.
         W, A, b = build_linear_system(blending_prob)
@@ -612,39 +629,49 @@ def _(build_linear_system, np, scipy):
                 )
                 assert np.allclose(x_tls_w_perturb, x_tls, atol=0.000001)
 
-        # make physical
-        # if np.any(x_tls < 0.0):
-        #     # eliminate the wine with the negative volume fraction
-        #     id_wine_eliminate = np.argmin(x_tls)
-        #     wines = blending_prob.pure_variety_fprints.index
-        #     new_wines = [
-        #         wine for wine in wines if wine != wines[id_wine_eliminate]
-        #     ]
-        #     print("eliminating wine: ", wines)
+        # handle non-negative volume fractions
+        if handle_non_negativity and np.any(x_tls < 0.0):
+            wines = blending_prob.pure_variety_fprints.index
+        
+            # eliminate the wine with the negative volume fraction
+            id_wine_remove = np.argmin(x_tls)
+            wine_to_remove = wines[id_wine_remove]
+            print(f"Eliminating wine: {wine_to_remove}")
+        
+            new_wines = wines.drop(wine_to_remove)
 
-        #     # new blending problem
-        #     new_blending_prob = WineBlendingProb(
-        #         blending_prob.pure_variety_fprints.loc[new_wines, :], 
-        #         blending_prob.blend_fprint, 
-        #         blending_prob.sigmas
-        #     )
+            # new blending problem
+            new_blending_prob = WineBlendingProb(
+                blending_prob.pure_variety_fprints.loc[new_wines, :], 
+                blending_prob.blend_fprint, 
+                blending_prob.sigmas
+            )
         
-        #     # run on reduced TLS problem
-        #     x_tls, delta_Ab = constrained_tls_soln(
-        #         new_blending_prob, verbose=verbose, run_checks=run_checks
-        #     )
-        #     return x_tls, delta_Ab 
+            # run on reduced TLS problem
+            _x_tls, _delta_Ab = constrained_tls_soln(
+                new_blending_prob, verbose=verbose, run_checks=run_checks
+            )
+
+            # handle re-sizing (we removed a wine)
+            x_tls = np.zeros(N)
+            delta_Ab = np.zeros((M, N+1))
+            mask = wines != wine_to_remove
+            x_tls[mask] = _x_tls
+            delta_Ab[:, np.append(mask, True)] = _delta_Ab
+            print("\t:xtls = ", x_tls)
         
-            # new_wines = [wine for wine in wines if ]
-            # if run_checks:
-            #     print("manually fixing x to be in [0, 1]")
-            # x_tls[x_tls < 0.0] = 0.0
-            # x_tls[x_tls > 1.0] = 1.0
-            # x_tls = x_tls / np.sum(x_tls)
+        if handle_non_negativity:
+            assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
 
     return (constrained_tls_soln,)
+
+
+@app.cell
+def _(blending_prob):
+    blending_prob.pure_variety_fprints.index#.drop("Merlot")
+    return
 
 
 @app.cell
@@ -656,15 +683,36 @@ def _(blending_prob, constrained_tls_soln):
     return delta_Ab, x_tls
 
 
-@app.cell
-def _(blending_prob):
-    blending_prob
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### test situation when $x_i<0$.blending_prob = WineBlendingProb(
+        pure_variety_fprints,
+        blend_fprints.loc[blend_selector.value],
+        sigmas
+    )
+    """)
     return
 
 
 @app.cell
-def _(blending_prob):
-    blending_prob
+def _(
+    WineBlendingProb,
+    blend_fprints,
+    constrained_tls_soln,
+    pure_variety_fprints,
+    sigmas,
+):
+    bad_blending_prob = WineBlendingProb(
+        pure_variety_fprints,
+        blend_fprints.loc[3] - 0.02,
+        sigmas
+    )
+    _x_tls, _delta_Ab = constrained_tls_soln(
+        bad_blending_prob, verbose=True, run_checks=True,
+        handle_non_negativity=True
+    )
+    _x_tls
     return
 
 
@@ -799,6 +847,7 @@ def _(constrained_tls_soln, sample_perturbed_problem):
                 perturbed_prob,
                 use_naive_method=use_naive_method
             )
+
             x_tlss.append(x_tls)
 
         return x_tlss
@@ -927,6 +976,9 @@ def _(
 
         # loop over blends
         for _blend_id in range(n_blends):
+            print("Blend: ", _blend_id)
+
+            # set up blending problem
             blending_prob = WineBlendingProb(
                 pure_variety_fprints,
                 blend_fprints.loc[_blend_id],
