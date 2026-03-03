@@ -133,6 +133,12 @@ def _(np, pd):
     return pure_variety_fprints, sigmas
 
 
+@app.cell
+def _(sigmas):
+    sigmas
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -152,13 +158,13 @@ def _(np):
 
         x_a = np.array(
             [
-                sigmas[constituent] * pv_fprints.loc[wine_a, constituent]
+                pv_fprints.loc[wine_a, constituent] / sigmas[constituent]
                 for constituent in constituents
             ]
         )
         x_b = np.array(
             [
-                sigmas[constituent] * pv_fprints.loc[wine_b, constituent]
+                pv_fprints.loc[wine_b, constituent] / sigmas[constituent]
                 for constituent in constituents
             ]
         )
@@ -257,6 +263,11 @@ def _(
         ax.scatter([x], [y], color=color, zorder=100, s=8**2)
 
     def viz_features(pure_variety_fprints, blend_fprints):
+        constituent_to_ymax = {
+            'alcohol [vol. %]': 15.0,
+            'sugar [g/L]': 5.05, 
+            'acid [g/L]': 6.1
+        }
         wines = pure_variety_fprints.index
         n_wines = len(wines)
         constituents = pure_variety_fprints.columns
@@ -306,7 +317,7 @@ def _(
             axs[c].set_xticks(xticks, xticklabels, rotation=90)
             axs[c].set_xlim(-0.5, xmax)
             axs[c].set_ylabel(constituent)
-            axs[c].set_ylim(ymin=0.0)
+            axs[c].set_ylim(0.0, constituent_to_ymax[constituent])
         plt.tight_layout()
 
         _savename = "features"
@@ -424,7 +435,7 @@ def _(np):
     def build_linear_system(blending_prob):
         wines = blending_prob.pure_variety_fprints.index
         constituents = blending_prob.pure_variety_fprints.columns
-    
+
         M = len(constituents)
         N = len(wines)
 
@@ -565,6 +576,20 @@ def _(
                 np.ravel(O @ Q2), np.zeros(N), atol=1e-5
             )
 
+            # ☑️ orthogonal invariance of Frob norm
+            assert np.isclose(
+                np.linalg.norm(WAb, ord='fro'), 
+                np.linalg.norm(WAb @ QR.Q, ord='fro')
+            )
+            assert np.isclose(
+                np.linalg.norm(WAb, ord='fro') ** 2, 
+                np.linalg.norm(
+                    WAb @ QR.Q[:, 0] # cuz a vector
+                ) ** 2 + np.linalg.norm(
+                    WAb @ Q2, ord='fro'
+                ) ** 2
+            )
+        
         # W [A b] Q2
         WAbQ2 = WAb @ Q2
         if run_checks:
@@ -596,8 +621,16 @@ def _(
         x_tls = -z[:N] / z[-1]
 
         if run_checks:
+            # ☑️ z size
+            assert np.size(z) == N+1
             # ☑️ z orthogonal to 1
             assert np.isclose(np.dot(np.ravel(z), np.ones(N+1)), 0.0)
+            # ☑️ vn in null space of perturbed matrix
+            Delta = sigma_n * u_n @ np.transpose(v_n)
+            assert np.allclose(
+                (WAbQ2 - Delta) @ v_n,
+                np.zeros(M)
+            )
 
         # total perturbation
         delta_Ab = sigma_n * np.linalg.inv(W) @  u_n @ np.transpose(Q2 @ v_n)
@@ -632,12 +665,12 @@ def _(
         # handle non-negative volume fractions
         if handle_non_negativity and np.any(x_tls < 0.0):
             wines = blending_prob.pure_variety_fprints.index
-        
+
             # eliminate the wine with the negative volume fraction
             id_wine_remove = np.argmin(x_tls)
             wine_to_remove = wines[id_wine_remove]
             print(f"Eliminating wine: {wine_to_remove}")
-        
+
             new_wines = wines.drop(wine_to_remove)
 
             # new blending problem
@@ -646,7 +679,7 @@ def _(
                 blending_prob.blend_fprint, 
                 blending_prob.sigmas
             )
-        
+
             # run on reduced TLS problem
             _x_tls, _delta_Ab = constrained_tls_soln(
                 new_blending_prob, verbose=verbose, run_checks=run_checks
@@ -659,7 +692,7 @@ def _(
             x_tls[mask] = _x_tls
             delta_Ab[:, np.append(mask, True)] = _delta_Ab
             print("\t:xtls = ", x_tls)
-        
+
         if handle_non_negativity:
             assert_feasible_vol_fracs(x_tls)
 
@@ -1109,7 +1142,28 @@ def _(mo):
 
 
 @app.cell
-def _():
+def _(
+    WineBlendingProb,
+    blend_fprints,
+    constrained_tls_soln,
+    pure_variety_fprints,
+    sigmas,
+):
+    for _blend_id in range(blend_fprints.shape[0]):
+        print("Blend: ", _blend_id)
+    
+        # set up blending problem
+        _blending_prob = WineBlendingProb(
+            pure_variety_fprints,
+            blend_fprints.loc[_blend_id],
+            sigmas
+        )
+    
+        ###
+        #   uncertainty quantification (predictions)
+        ###
+        _x_tls, _delta_Ab = constrained_tls_soln(_blending_prob)
+        print(_delta_Ab)
     return
 
 
