@@ -549,7 +549,7 @@ def _(
                 #  satisfy the sum to one constraint
                 x_naive = np.linalg.solve(A, b)
                 assert np.allclose(
-                    x_naive, - WAb_null[:3] / WAb_null[3]
+                    x_naive, - WAb_null[:N] / WAb_null[N]
                 )
             else:
                 assert WAb_null.size == 0
@@ -589,7 +589,7 @@ def _(
                     WAb @ Q2, ord='fro'
                 ) ** 2
             )
-        
+
         # W [A b] Q2
         WAbQ2 = WAb @ Q2
         if run_checks:
@@ -1151,19 +1151,130 @@ def _(
 ):
     for _blend_id in range(blend_fprints.shape[0]):
         print("Blend: ", _blend_id)
-    
+
         # set up blending problem
         _blending_prob = WineBlendingProb(
             pure_variety_fprints,
             blend_fprints.loc[_blend_id],
             sigmas
         )
-    
+
         ###
         #   uncertainty quantification (predictions)
         ###
         _x_tls, _delta_Ab = constrained_tls_soln(_blending_prob)
         print(_delta_Ab)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## viz geometry with simplified problem
+
+    use the blend that is composed of only two wines.
+    """)
+    return
+
+
+@app.cell
+def _(
+    WineBlendingProb,
+    blend_fprints,
+    blend_makeup,
+    build_linear_system,
+    constrained_tls_soln,
+    np,
+    pure_variety_fprints,
+    sigmas,
+):
+    toy_wines = ["Cab. Sauv.", "Merlot"]
+    toy_constituents = ["acid [g/L]", "sugar [g/L]"]
+    toy_blend_id = 3
+    assert blend_makeup.loc[
+        toy_blend_id, (set(blend_makeup.columns) - set(toy_wines)).pop()
+        ] == 0.0
+
+    toy_blending_prob = WineBlendingProb(
+        pure_variety_fprints.loc[toy_wines, toy_constituents],
+        blend_fprints.loc[toy_blend_id, toy_constituents],
+        sigmas
+    )
+
+    x_tls_toy, delta_Ab_toy = constrained_tls_soln(
+        toy_blending_prob, 
+        verbose=False, run_checks=True
+    )
+
+    W_toy, A_toy, b_toy = build_linear_system(toy_blending_prob)
+
+    A_hat_toy = A_toy - delta_Ab_toy[:, :-1]
+    b_hat_toy = b_toy - delta_Ab_toy[:, -1].reshape((2, 1))
+
+    x_toy_naive = np.linalg.solve(A_toy, b_toy)
+    np.sum(x_toy_naive)
+    return delta_Ab_toy, toy_blend_id, toy_constituents, toy_wines
+
+
+@app.function
+def draw_vector(ax, x, y, label, color, linestyle="-"):
+    # ax.quiver(
+    #     0, 0, # origin
+    #     x, y, angles='xy', scale_units='xy', scale=1,
+    #     label=label, color=color, linestyle=linestyle
+    # )
+    ax.annotate("", 
+        xy=(x, y), xytext=(0, 0),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=color,
+            linestyle=linestyle,
+            lw=1.5
+        )
+    )
+    ax.plot([], [], color=color, linestyle=linestyle, label=label)  # for legend
+
+
+@app.cell
+def _(
+    blend_fprints,
+    delta_Ab_toy,
+    plt,
+    pure_variety_fprints,
+    toy_blend_id,
+    toy_constituents,
+    toy_wines,
+    wine_to_color,
+):
+    fig, ax = plt.subplots()
+    plt.xlabel(toy_constituents[0])
+    plt.ylabel(toy_constituents[1])
+    for w, toy_wine in enumerate(toy_wines):
+        x = pure_variety_fprints.loc[toy_wine, toy_constituents[0]]
+        y = pure_variety_fprints.loc[toy_wine, toy_constituents[1]]
+        draw_vector(ax, x, y, toy_wine, wine_to_color[toy_wine])
+
+        # perturbed
+        draw_vector(
+            ax, x-delta_Ab_toy[0, w], y-delta_Ab_toy[1, w], 
+            None, wine_to_color[toy_wine], linestyle="--"
+        )
+
+    x_blend = blend_fprints.loc[toy_blend_id, toy_constituents[0]]
+    y_blend = blend_fprints.loc[toy_blend_id, toy_constituents[1]]
+    draw_vector(
+        ax, x_blend, y_blend, f"blend {toy_blend_id+1}", wine_to_color[toy_blend_id]
+    )
+    draw_vector(
+        ax, x_blend-delta_Ab_toy[0, -1], y_blend-delta_Ab_toy[1, -1],
+        None, wine_to_color[toy_blend_id],
+        linestyle="--"
+    )
+
+    plt.legend()
+    plt.xlim([0, 15])
+    plt.ylim([0, 5])
+    plt.show()
     return
 
 
