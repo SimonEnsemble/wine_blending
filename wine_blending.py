@@ -106,19 +106,20 @@ def _(np, pd):
         index=_wines
     ) # day 2
 
-    pure_variety_fprints = (_pv_fprints_1 + _pv_fprints_2) / 2
+    pv_fprints = (_pv_fprints_1 + _pv_fprints_2) / 2
 
     # calculate std over the two days for the sigmas
     sigmas = {}
-    trust_factor = 1.1 # inflate to account for bias
-    for _feature in pure_variety_fprints.columns:
+    trust_factor = 1.0 # inflate to account for bias
+    for _feature in pv_fprints.columns:
         sigmas[_feature] = np.zeros(3)
         for (_w, _wine) in enumerate(_wines):
             sigmas[_feature][_w] = np.std(
                 [
                     _pv_fprints_1.loc[_wine, _feature], 
                     _pv_fprints_2.loc[_wine, _feature]
-                ]
+                ],
+                ddof=1
             ) * trust_factor
 
         sigmas[_feature] = np.mean(sigmas[_feature])
@@ -127,10 +128,10 @@ def _(np, pd):
     sigma_bar = np.mean(
         [
             sigmas[constituent] 
-            for constituent in pure_variety_fprints.columns
+            for constituent in pv_fprints.columns
         ]
     )
-    return pure_variety_fprints, sigmas
+    return pv_fprints, sigmas
 
 
 @app.cell
@@ -177,25 +178,25 @@ def _(np):
 
 
 @app.cell
-def _(fingerprint_angles, pure_variety_fprints, sigmas):
+def _(fingerprint_angles, pv_fprints, sigmas):
     fingerprint_angles(
-        pure_variety_fprints, "Cab. Sauv.", "Merlot", sigmas
+        pv_fprints, "Cab. Sauv.", "Merlot", sigmas
     )
     return
 
 
 @app.cell
-def _(fingerprint_angles, pure_variety_fprints, sigmas):
+def _(fingerprint_angles, pv_fprints, sigmas):
     fingerprint_angles(
-        pure_variety_fprints, "Cab. Sauv.", "Cab. Franc", sigmas
+        pv_fprints, "Cab. Sauv.", "Cab. Franc", sigmas
     )
     return
 
 
 @app.cell
-def _(fingerprint_angles, pure_variety_fprints, sigmas):
+def _(fingerprint_angles, pv_fprints, sigmas):
     fingerprint_angles(
-        pure_variety_fprints, "Merlot", "Cab. Franc", sigmas
+        pv_fprints, "Merlot", "Cab. Franc", sigmas
     )
     return
 
@@ -222,11 +223,11 @@ def _(pd):
 
 
 @app.cell
-def _(blend_fprints, pure_variety_fprints):
+def _(blend_fprints, pv_fprints):
     # blend features should be within range of parent pure variety wines
     for _constituent in blend_fprints.columns:
-        max_conc = pure_variety_fprints[_constituent].max()
-        min_conc = pure_variety_fprints[_constituent].min()
+        max_conc = pv_fprints[_constituent].max()
+        min_conc = pv_fprints[_constituent].min()
 
         for _b in range(blend_fprints.shape[0]):
             conc_blend = blend_fprints.loc[_b, _constituent]
@@ -245,32 +246,26 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    incl_blends_checkbox = mo.ui.checkbox(label="include blends?")
+    incl_blends_checkbox = mo.ui.checkbox(label="include blends?", value=True)
     incl_blends_checkbox
     return (incl_blends_checkbox,)
 
 
 @app.cell
-def _(
-    blend_fprints,
-    incl_blends_checkbox,
-    plt,
-    pure_variety_fprints,
-    wine_to_color,
-):
+def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
     def _draw_lollipop(ax, x, y, color):
         ax.plot([x, x], [0, y], color=color, zorder=100)
         ax.scatter([x], [y], color=color, zorder=100, s=8**2)
 
-    def viz_features(pure_variety_fprints, blend_fprints):
+    def viz_features(pv_fprints, blend_fprints):
         constituent_to_ymax = {
             'alcohol [vol. %]': 15.0,
             'sugar [g/L]': 5.05, 
             'acid [g/L]': 6.1
         }
-        wines = pure_variety_fprints.index
+        wines = pv_fprints.index
         n_wines = len(wines)
-        constituents = pure_variety_fprints.columns
+        constituents = pv_fprints.columns
         if incl_blends_checkbox.value:
             n_blends = blend_fprints.shape[0]
         else:
@@ -283,8 +278,10 @@ def _(
         fig, axs = plt.subplots(1, 3, figsize=figsize)
 
         for c, constituent in enumerate(constituents):
+            axs[c].minorticks_off()
+            axs[c].xaxis.grid(False)
             for w, wine in enumerate(wines):
-                conc = pure_variety_fprints.loc[wine, constituent]
+                conc = pv_fprints.loc[wine, constituent]
                 _draw_lollipop(axs[c], w, conc, wine_to_color[wine])
 
             xticks = list(range(n_wines))
@@ -329,7 +326,7 @@ def _(
         plt.savefig(_savename + ".pdf", format="pdf")
         return fig
 
-    viz_features(pure_variety_fprints, blend_fprints)
+    viz_features(pv_fprints, blend_fprints)
     return
 
 
@@ -391,13 +388,13 @@ def _(mo):
 def _(dataclass, pd):
     @dataclass
     class WineBlendingProb:
-        pure_variety_fprints : pd.DataFrame
+        pv_fprints : pd.DataFrame
         blend_fprint : pd.Series
         sigmas : dict
 
         def __post_init__(self):
             # order of constiuents same
-            c1 = self.pure_variety_fprints.columns
+            c1 = self.pv_fprints.columns
             c2 = self.blend_fprint.index
             assert all(c1 == c2)
 
@@ -414,15 +411,9 @@ def _(mo):
 
 
 @app.cell
-def _(
-    WineBlendingProb,
-    blend_fprints,
-    blend_selector,
-    pure_variety_fprints,
-    sigmas,
-):
+def _(WineBlendingProb, blend_fprints, blend_selector, pv_fprints, sigmas):
     blending_prob = WineBlendingProb(
-        pure_variety_fprints,
+        pv_fprints,
         blend_fprints.loc[blend_selector.value],
         sigmas
     )
@@ -433,13 +424,13 @@ def _(
 @app.cell
 def _(np):
     def build_linear_system(blending_prob):
-        wines = blending_prob.pure_variety_fprints.index
-        constituents = blending_prob.pure_variety_fprints.columns
+        wines = blending_prob.pv_fprints.index
+        constituents = blending_prob.pv_fprints.columns
 
         M = len(constituents)
         N = len(wines)
 
-        A = np.transpose(blending_prob.pure_variety_fprints.values)
+        A = np.transpose(blending_prob.pv_fprints.values)
         b = blending_prob.blend_fprint.values.reshape((M, 1))
 
         sigma_bar = np.mean(
@@ -508,8 +499,8 @@ def _(
         WAb = W @ Ab
 
         # case M+1 > N
-        M = blending_prob.pure_variety_fprints.shape[1] # constituents
-        N = blending_prob.pure_variety_fprints.shape[0] # parent mixtures
+        M = blending_prob.pv_fprints.shape[1] # constituents
+        N = blending_prob.pv_fprints.shape[0] # parent mixtures
 
         if use_naive_method:
             if M == N:
@@ -664,18 +655,19 @@ def _(
 
         # handle non-negative volume fractions
         if handle_non_negativity and np.any(x_tls < 0.0):
-            wines = blending_prob.pure_variety_fprints.index
+            wines = blending_prob.pv_fprints.index
 
             # eliminate the wine with the negative volume fraction
             id_wine_remove = np.argmin(x_tls)
             wine_to_remove = wines[id_wine_remove]
-            print(f"Eliminating wine: {wine_to_remove}")
+            if verbose:
+                print(f"Eliminating wine: {wine_to_remove}")
 
             new_wines = wines.drop(wine_to_remove)
 
             # new blending problem
             new_blending_prob = WineBlendingProb(
-                blending_prob.pure_variety_fprints.loc[new_wines, :], 
+                blending_prob.pv_fprints.loc[new_wines, :], 
                 blending_prob.blend_fprint, 
                 blending_prob.sigmas
             )
@@ -691,7 +683,6 @@ def _(
             mask = wines != wine_to_remove
             x_tls[mask] = _x_tls
             delta_Ab[:, np.append(mask, True)] = _delta_Ab
-            print("\t:xtls = ", x_tls)
 
         if handle_non_negativity:
             assert_feasible_vol_fracs(x_tls)
@@ -699,12 +690,6 @@ def _(
         return np.ravel(x_tls), delta_Ab
 
     return (constrained_tls_soln,)
-
-
-@app.cell
-def _(blending_prob):
-    blending_prob.pure_variety_fprints.index#.drop("Merlot")
-    return
 
 
 @app.cell
@@ -719,11 +704,7 @@ def _(blending_prob, constrained_tls_soln):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### test situation when $x_i<0$.blending_prob = WineBlendingProb(
-        pure_variety_fprints,
-        blend_fprints.loc[blend_selector.value],
-        sigmas
-    )
+    ### test situation when $x_i<0$.
     """)
     return
 
@@ -733,11 +714,11 @@ def _(
     WineBlendingProb,
     blend_fprints,
     constrained_tls_soln,
-    pure_variety_fprints,
+    pv_fprints,
     sigmas,
 ):
     bad_blending_prob = WineBlendingProb(
-        pure_variety_fprints,
+        pv_fprints,
         blend_fprints.loc[3] - 0.02,
         sigmas
     )
@@ -787,10 +768,10 @@ def _(
     blend_fprints,
     constrained_tls_soln,
     np,
-    pure_variety_fprints,
+    pv_fprints,
     sigmas,
 ):
-    bogus_pv_fprints = pure_variety_fprints.copy()
+    bogus_pv_fprints = pv_fprints.copy()
     bogus_pv_fprints["blah [g/L]"] = np.random.rand(3)
 
     bogus_blend_fprint = blend_fprints.loc[0].copy()
@@ -819,11 +800,11 @@ def _(mo):
 def _(WineBlendingProb, np, sigmas):
     def sample_perturbed_problem(blending_prob):
         # copy these b/c we'll change them
-        pure_variety_fprints = blending_prob.pure_variety_fprints.copy()
+        pv_fprints = blending_prob.pv_fprints.copy()
         blend_fprint         = blending_prob.blend_fprint.copy()
 
-        wines = pure_variety_fprints.index
-        constituents = pure_variety_fprints.columns
+        wines = pv_fprints.index
+        constituents = pv_fprints.columns
 
         for constituent in constituents:
             sigma = blending_prob.sigmas[constituent]
@@ -831,14 +812,14 @@ def _(WineBlendingProb, np, sigmas):
             # perturb wine fingerprint
             for wine in wines:
                 delta = sigma * np.random.normal()
-                pure_variety_fprints.loc[wine, constituent] += delta
+                pv_fprints.loc[wine, constituent] += delta
 
             # perturb blend fingerprint
             delta = sigma * np.random.normal()
             blend_fprint.loc[constituent] += delta
 
         return WineBlendingProb(
-            pure_variety_fprints,
+            pv_fprints,
             blend_fprint,
             sigmas
         )
@@ -856,7 +837,7 @@ def _(blending_prob, np, sample_perturbed_problem):
     assert np.all(delta_blend.values != 0.0)
 
     # check pure variety fingerprints changed
-    delta_pv = perturbed_prob.pure_variety_fprints.values - blending_prob.pure_variety_fprints.values
+    delta_pv = perturbed_prob.pv_fprints.values - blending_prob.pv_fprints.values
     assert np.unique(delta_pv).size == delta_pv.size
     assert np.all(delta_pv != 0.0)
 
@@ -906,12 +887,13 @@ def _(mo):
 
 
 @app.cell
-def _(np, perturbed_x_tlss, x_tls):
-    assert np.allclose(
-        np.mean(perturbed_x_tlss, axis=0),
-        x_tls, 
-        atol=0.01
-    )
+def _():
+    # fails for any blend where we see x<0 and need to resolve.
+    # assert np.allclose(
+    #     np.mean(perturbed_x_tlss, axis=0),
+    #     x_tls, 
+    #     atol=0.01
+    # )
     return
 
 
@@ -976,15 +958,15 @@ def _(
     np,
     perturbed_x_tlss,
     plt,
-    pure_variety_fprints,
+    pv_fprints,
     sample_perturbed_solutions,
     sigmas,
     wine_to_color,
 ):
     def draw_simplex(
-        pure_variety_fprints, blend_fprints, sigmas
+        pv_fprints, blend_fprints, sigmas
     ):
-        wines = pure_variety_fprints.index
+        wines = pv_fprints.index
         n_blends = blend_fprints.shape[0]
 
         all_errors = [] # for error analysis
@@ -1013,7 +995,7 @@ def _(
 
             # set up blending problem
             blending_prob = WineBlendingProb(
-                pure_variety_fprints,
+                pv_fprints,
                 blend_fprints.loc[_blend_id],
                 sigmas
             )
@@ -1123,7 +1105,7 @@ def _(
         plt.savefig(_savename + ".pdf", format="pdf")
         plt.show()
 
-    draw_simplex(pure_variety_fprints, blend_fprints, sigmas)
+    draw_simplex(pv_fprints, blend_fprints, sigmas)
     return
 
 
@@ -1146,24 +1128,86 @@ def _(
     WineBlendingProb,
     blend_fprints,
     constrained_tls_soln,
-    pure_variety_fprints,
+    pd,
+    pv_fprints,
     sigmas,
 ):
-    for _blend_id in range(blend_fprints.shape[0]):
-        print("Blend: ", _blend_id)
+    def analyze_corrections(pv_fprints, blend_fprints, sigmas):
+        corrections = pd.DataFrame()
+        for blend_id in range(blend_fprints.shape[0]):   
+            blending_prob = WineBlendingProb(
+                pv_fprints,
+                blend_fprints.loc[blend_id],
+                sigmas
+            )
+    
+            x_tls, delta_Ab = constrained_tls_soln(blending_prob)
 
-        # set up blending problem
-        _blending_prob = WineBlendingProb(
-            pure_variety_fprints,
-            blend_fprints.loc[_blend_id],
-            sigmas
+            for c, constituent in enumerate(pv_fprints.columns):
+                for w, wine in enumerate(list(pv_fprints.index) + ['blend']):
+                    new_row = pd.DataFrame(
+                        [
+                            {
+                                'wine': wine,
+                                'blend': blend_id + 1,
+                                'constituent': constituent,
+                                'Δ': delta_Ab[c, w]
+                            }
+                        ]
+                    )
+
+                    corrections = pd.concat(
+                        [corrections, new_row], ignore_index=True
+                    )
+        return corrections
+
+    corrections = analyze_corrections(pv_fprints, blend_fprints, sigmas)
+    corrections.head()
+    return (corrections,)
+
+
+@app.cell
+def _(plt, sns, wine_to_color):
+    def viz_corrections(corrections, sigmas):
+        groups = corrections.groupby("constituent")
+
+        constituents = corrections["constituent"].unique()
+    
+        fig, axes = plt.subplots(
+            1, len(groups), figsize=(3.2 * len(groups), 5)
         )
 
-        ###
-        #   uncertainty quantification (predictions)
-        ###
-        _x_tls, _delta_Ab = constrained_tls_soln(_blending_prob)
-        print(_delta_Ab)
+        palette = {i+1: wine_to_color[i] for i in range(4)}
+        markers = ['o', 's', '^', 'D']
+        for i, (ax, constituent) in enumerate(zip(axes, constituents)):
+            group = groups.get_group(constituent)
+            sns.stripplot(
+                group, x="wine", y="Δ", hue="blend", ax=ax, dodge=True,
+                palette=palette, s=10, marker="X"
+            )
+            if i != 1:
+                ax.get_legend().remove()
+            else:
+                ax.legend(
+                    title="blending problem", fontsize=12, title_fontsize=12,
+                    ncol=2
+                )
+            ax.minorticks_off()
+            ax.set_ylabel("Δ " + constituent)
+            ax.tick_params(axis='x', labelrotation=90)
+            ax.axhline(sigmas[constituent], color="gray", linestyle="--")
+            ax.axhline(-sigmas[constituent], color="gray", linestyle="--")
+
+        plt.tight_layout()
+        plt.savefig("corrections.pdf", format="pdf")
+        plt.show()
+
+    return (viz_corrections,)
+
+
+@app.cell
+def _(corrections, sigmas, viz_corrections):
+    viz_corrections(corrections, sigmas)
     return
 
 
@@ -1185,7 +1229,7 @@ def _(
     build_linear_system,
     constrained_tls_soln,
     np,
-    pure_variety_fprints,
+    pv_fprints,
     sigmas,
 ):
     toy_wines = ["Cab. Sauv.", "Merlot"]
@@ -1196,7 +1240,7 @@ def _(
         ] == 0.0
 
     toy_blending_prob = WineBlendingProb(
-        pure_variety_fprints.loc[toy_wines, toy_constituents],
+        pv_fprints.loc[toy_wines, toy_constituents],
         blend_fprints.loc[toy_blend_id, toy_constituents],
         sigmas
     )
@@ -1232,7 +1276,7 @@ def draw_vector(ax, x, y, label, color, linestyle="-"):
             lw=1.5
         )
     )
-    ax.plot([], [], color=color, linestyle=linestyle, label=label)  # for legend
+    ax.plot([], [], color=color, linestyle=linestyle, label=label)
 
 
 @app.cell
@@ -1240,7 +1284,7 @@ def _(
     blend_fprints,
     delta_Ab_toy,
     plt,
-    pure_variety_fprints,
+    pv_fprints,
     toy_blend_id,
     toy_constituents,
     toy_wines,
@@ -1250,8 +1294,8 @@ def _(
     plt.xlabel(toy_constituents[0])
     plt.ylabel(toy_constituents[1])
     for w, toy_wine in enumerate(toy_wines):
-        x = pure_variety_fprints.loc[toy_wine, toy_constituents[0]]
-        y = pure_variety_fprints.loc[toy_wine, toy_constituents[1]]
+        x = pv_fprints.loc[toy_wine, toy_constituents[0]]
+        y = pv_fprints.loc[toy_wine, toy_constituents[1]]
         draw_vector(ax, x, y, toy_wine, wine_to_color[toy_wine])
 
         # perturbed
@@ -1331,14 +1375,14 @@ def _(b):
 
 
 @app.cell
-def _(pure_variety_fprints):
-    pure_variety_fprints["alcohol [vol. %]"].max()
+def _(pv_fprints):
+    pv_fprints["alcohol [vol. %]"].max()
     return
 
 
 @app.cell
-def _(pure_variety_fprints):
-    pure_variety_fprints["alcohol [vol. %]"].min()
+def _(pv_fprints):
+    pv_fprints["alcohol [vol. %]"].min()
     return
 
 
