@@ -987,10 +987,8 @@ def _(
         ax.grid(which='major', linestyle='-', alpha=0.3)
         ax.grid(which='minor', linestyle=':', alpha=0.3)
 
-        markersize = 6
-
-        dx_text = [[0.05, 0.0, 0.05], [0.0, 0.1, 0.0]]
-
+        markersize = 8
+        nb_samples = 2500
         # loop over blends
         for blend_id in range(n_blends):
             # set up blending problem
@@ -1005,7 +1003,7 @@ def _(
             ###
             x_tlss = sample_perturbed_solutions(
                 blending_prob, 
-                n_samples=2500 if checkbox_kde.value else 100,
+                n_samples=nb_samples if checkbox_kde.value else 100,
                 use_naive_method=False
             )
             alpha = 10.0
@@ -1055,7 +1053,7 @@ def _(
             x_tls, delta_Ab = constrained_tls_soln(blending_prob)
             ax.scatter(
                 *x_tls,
-                label="TLS", marker="+", facecolor=wine_to_color[blend_id],
+                label="TLS", marker="*", facecolor=wine_to_color[blend_id],
                 s=markersize ** 2, color="black", clip_on=False, zorder=1000
             )
 
@@ -1094,17 +1092,42 @@ def _(
                 fontsize=12
             )
         else:
-            patches = [
+            blend_handles = [
                 mpl.patches.Patch(
-                    color=wine_to_color[_blend_id], 
-                    label=f"{_blend_id+1}"
-                ) for _blend_id in range(n_blends)
+                    color=wine_to_color[_blend_id], label=f"{_blend_id+1}"
+                ) 
+                for _blend_id in range(n_blends)
             ]
-            plt.legend(
-                handles=patches, title="blend", loc='upper right',
-                prop={'size': 10}, title_fontsize='small',
-                bbox_to_anchor=(1.05, 1.05)
+        
+            symbol_handles = [
+                Line2D(
+                    [0], [0], marker='^', color='none', markeredgecolor='black',
+                    markerfacecolor='none', markersize=8, label='actual'
+                ),
+                Line2D(
+                    [0], [0], marker='*', color='none', markeredgecolor='black',
+                    markerfacecolor='none', markersize=10, label='predicted'
+                )
+            ]
+
+            leg1 = ax.legend(
+                handles=blend_handles, loc='upper left',
+                bbox_to_anchor=(0.95, 1.1), borderaxespad=0, title='blend',
+                prop={'size': 10}, title_fontsize=12
             )
+
+            leg2 = ax.legend(
+                handles=symbol_handles, loc='upper left',
+                bbox_to_anchor=(1.01, 1 - (len(blend_handles) + 1) * 0.06),
+                borderaxespad=0, prop={'size': 10}
+            )
+
+            ax.add_artist(leg1)  # re-add first legend
+            # plt.legend(
+            #     handles=patches, title="blend", loc='upper right',
+            #     prop={'size': 10}, title_fontsize='small',
+            #     bbox_to_anchor=(1.05, 1.05)
+            # )
 
         plt.tight_layout()
         _savename = "composition_triangle"
