@@ -32,7 +32,6 @@ def _():
         MultipleLocator,
         dataclass,
         get_triangular_grid,
-        mcolors,
         mo,
         mpl,
         np,
@@ -134,6 +133,12 @@ def _(np, pd):
         ]
     )
     return pv_fprints, sigmas
+
+
+@app.cell
+def _(pv_fprints):
+    pv_fprints
+    return
 
 
 @app.cell
@@ -928,15 +933,15 @@ def _(my_density, np):
         rho_max = np.max(rho)
         rho_sum = np.sum(rho)
 
-        levels = np.linspace(0.0, 1.0, n) * rho_max
+        levels = np.linspace(0.0, rho_max, n)
         for i in range(1, n):
             # fraction of density above this value
             f_density = np.sum(rho[rho > levels[-i]]) / rho_sum
             if f_density > alpha:
                 return levels[-i]
 
-    get_level(my_density, 0.98)
-    return
+    get_level(my_density, 0.95)
+    return (get_level,)
 
 
 @app.cell
@@ -956,8 +961,9 @@ def _(
     checkbox_kde,
     constrained_tls_soln,
     do_trinary_kde,
-    mcolors,
+    get_level,
     mpl,
+    my_density,
     np,
     plt,
     pv_fprints,
@@ -1018,15 +1024,18 @@ def _(
             if checkbox_kde.value:
                 tn0, tn1, tn2, density = do_trinary_kde(x_tlss, n=100)
 
-                N_levels = 4
-                cmap = mcolors.LinearSegmentedColormap.from_list(
-                    "", ["white", wine_to_color[blend_id]], N=N_levels+2,
-                )
+                # N_levels = 4
+                # cmap = mcolors.LinearSegmentedColormap.from_list(
+                #     "", ["white", wine_to_color[blend_id]], N=N_levels+2,
+                # )
 
-                ax.tricontour(
-                    tn0, tn1, tn2, density, 
-                    levels=N_levels,
-                    cmap=cmap,
+                level = get_level(my_density, 0.90)
+
+                ax.tricontourf(
+                    tn0, tn1, tn2, density,
+                    levels=[level, density.max()],
+                    colors=[wine_to_color[blend_id]],
+                    alpha=0.4,
                 )
             else:
                 for s in range(len(x_tlss)):
@@ -1066,7 +1075,7 @@ def _(
                 print(f"\t\tpred: {np.round(100*x_tls[w], decimals=1):.1f}%")
                 print(f"\t\t{alpha}% CI: ")
                 print(f"\t\t[{lower[w]}, {upper[w]}]")
-            
+
             # errors
             errors = np.abs(x_tls - blend_makeup.loc[blend_id, wines].values)
             all_errors.append(errors)
@@ -1098,7 +1107,7 @@ def _(
                 ) 
                 for _blend_id in range(n_blends)
             ]
-        
+
             symbol_handles = [
                 Line2D(
                     [0], [0], marker='^', color='none', markeredgecolor='black',
@@ -1255,6 +1264,12 @@ def _(plt, sns, wine_to_color):
             ax.tick_params(axis='x', labelrotation=90)
             ax.axhline(sigmas[constituent], color="gray", linestyle="--")
             ax.axhline(-sigmas[constituent], color="gray", linestyle="--")
+        
+            # shade every other wine-group band to visually separate them
+            for j in [1, 3]:
+                ax.axvspan(
+                    j - 0.5, j + 0.5, color="gray", alpha=0.12, zorder=0
+                )
 
         plt.tight_layout()
         plt.savefig("corrections.pdf", format="pdf")
