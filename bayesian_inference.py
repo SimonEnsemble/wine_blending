@@ -23,13 +23,26 @@ def _():
     import pocomc as pc
     import scipy
     import mpltern
+    from scipy.stats import gaussian_kde
     from aquarel import load_theme
     from dataclasses import dataclass
 
     theme = load_theme("umbra_light")
     theme.apply()
     plt.rc('font', size=16)
-    return MultipleLocator, dirichlet, inv_logit, logit, mo, np, pd, plt, sns
+    return (
+        MultipleLocator,
+        dirichlet,
+        gaussian_kde,
+        inv_logit,
+        logit,
+        mo,
+        np,
+        pc,
+        pd,
+        plt,
+        sns,
+    )
 
 
 @app.cell
@@ -283,7 +296,7 @@ def _(pd):
         }
     )
     blend_makeup
-    return
+    return (blend_makeup,)
 
 
 @app.cell(hide_code=True)
@@ -489,16 +502,6 @@ def _(mc_prior, np):
     return
 
 
-@app.cell
-def _(DirichletStickbreakPrior, np, xz_of_y):
-    alpha = np.array([1.0, 1.0, 1.0])
-    prior = DirichletStickbreakPrior(alpha)
-    prior.logpdf(np.array([4.0, 5.0]))
-    ys_prior = prior.rvs(250)
-    xs_prior = [xz_of_y(yi)[0] for yi in ys_prior]
-    return (xs_prior,)
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -537,23 +540,50 @@ def _(np, plt, prior_toy):
     return
 
 
-@app.cell
-def _(np):
-    def log_likelihood(x):
-        return -np.sum(10.0 * (x[:, ::2] ** 2.0 - x[:, 1::2]) ** 2.0 + (x[:, ::2] - 1.0) ** 2.0, axis=1)
-
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## set the real prior
+    """)
     return
 
 
 @app.cell
-def _(MultipleLocator, blend_fprints, plt, pv_fprints, sigmas, xs_prior):
+def _(DirichletStickbreakPrior, np):
+    alpha = np.array([1.0, 1.0, 1.0])
+    prior = DirichletStickbreakPrior(alpha)
+    return (prior,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    sample from it
+    """)
+    return
+
+
+@app.cell
+def _(prior):
+    ys_prior = prior.rvs(500)
+    xs_prior = prior._stickbreak_forward(ys_prior)[0]
+    return (xs_prior,)
+
+
+@app.cell
+def _(blend_fprints, draw_simplex, pv_fprints, xs_prior):
+    draw_simplex(xs_prior, pv_fprints, blend_fprints)
+    return
+
+
+@app.cell
+def _(MultipleLocator, gaussian_kde, np, plt):
     def draw_simplex(
-        xs_prior, pv_fprints, blend_fprints, sigmas
+        xs, pv_fprints, blend_fprints, b_true=None, 
+        do_kde=False, do_scatter=True
     ):
         wines = pv_fprints.index
         n_blends = blend_fprints.shape[0]
-
-        all_errors = [] # for error analysis
 
         ax = plt.subplot(projection="ternary")
 
@@ -569,27 +599,155 @@ def _(MultipleLocator, blend_fprints, plt, pv_fprints, sigmas, xs_prior):
         ax.grid(which='major', linestyle='-', alpha=0.3)
         ax.grid(which='minor', linestyle=':', alpha=0.3)
 
-        for x in xs_prior:
+        if do_scatter:
             ax.scatter(
-                [x[0]], [x[1]], [x[2]],
+                xs[:, 0], xs[:, 1], xs[:, 2], 
                 marker="o", #color=wine_to_color[blend_id], alpha=0.1,
                 s=25
             )
 
-        ###
-        #   true blend composition
-        ###
-        # for blend_id in ble
-        # ax.scatter(
-        #     [blend_makeup.loc[blend_id, wines[0]]],
-        #     [blend_makeup.loc[blend_id, wines[1]]],
-        #     [blend_makeup.loc[blend_id, wines[2]]],
-        #     label="truth", marker="^", facecolor=wine_to_color[blend_id],
-        #     s=markersize ** 2, color="black", clip_on=False, zorder=1000
-        # )
+        # KDE
+        if do_kde:
+            grid_n = 500
+            kde = gaussian_kde(xs[:, :2].T)
+            t_vals = np.linspace(0, 1, grid_n)
+            l_vals = np.linspace(0, 1, grid_n)
+            T, L = np.meshgrid(t_vals, l_vals)
+            R = 1 - T - L
+            mask = R >= 0
+            T_flat, L_flat, R_flat = T[mask], L[mask], R[mask]
+    
+            density = kde(np.vstack([T_flat, L_flat]))
+
+            density_at_samples = kde(xs[:, :2].T)
+
+            for alpha, hdr_mass in zip([0.5, 0.7, 0.9], [0.9, 0.8, 0.7]):
+                hdr_threshold = np.quantile(density_at_samples, 1 - hdr_mass)
+    
+                ax.tricontourf(
+                    T_flat, L_flat, R_flat, density,
+                    cmap="Greens", levels=[hdr_threshold, density.max()],
+                    alpha=alpha
+                )
+
+        if b_true is not None:
+            ax.scatter(
+                [b_true[0]], [b_true[1]], [b_true[2]], 
+                marker="+", #color=wine_to_color[blend_id], alpha=0.1,
+                s=35, color="white"
+            )
+
         plt.show()
 
-    draw_simplex(xs_prior, pv_fprints, blend_fprints, sigmas)
+    return (draw_simplex,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # likelihood
+    """)
+    return
+
+
+@app.cell
+def _():
+    blend_id = 1
+    return (blend_id,)
+
+
+@app.cell
+def _(pv_fprints):
+    A = pv_fprints.values.T
+    A
+    return (A,)
+
+
+@app.cell
+def _(blend_fprints, blend_id):
+    b = blend_fprints.iloc[blend_id, :].values
+    b
+    return (b,)
+
+
+@app.cell
+def _(blend_id, blend_makeup):
+    b_true = blend_makeup.iloc[blend_id, :].values
+    b_true
+    return (b_true,)
+
+
+@app.cell
+def _(blend_fprints):
+    blend_fprints.columns
+    return
+
+
+@app.cell
+def _(blend_fprints, np, sigmas):
+    sigs = np.array([sigmas[c] for c in blend_fprints.columns])
+    sigs
+    return (sigs,)
+
+
+@app.cell
+def _(A, b, np, prior, sigs):
+    def log_likelihood(y):
+        y = np.atleast_2d(y)                      # (n_walkers, K-1)
+
+        # stick-breaking transform to get x
+        x, _ = prior._stickbreak_forward(y)       # (n_walkers, K)
+
+        # predicted blend fingerprint
+        b_pred = x @ A.T                          # (n_walkers, m)
+
+        # residual
+        resid = b_pred - b                       # (n_walkers, m)
+
+        # log likelihood
+        loglike = -0.5 * np.sum((resid / sigs) **2, axis=-1)
+    
+        return loglike
+
+    return (log_likelihood,)
+
+
+@app.cell
+def _(log_likelihood, np):
+    log_likelihood(np.array([-3.0, 5.0]))
+    return
+
+
+@app.cell
+def _(log_likelihood, pc, prior):
+    sampler = pc.Sampler(
+        prior=prior,
+        likelihood=log_likelihood,
+        vectorize=True
+    )
+    sampler.run()
+    return (sampler,)
+
+
+@app.cell
+def _(prior, sampler):
+    y_samples, _, _, _ = sampler.posterior()
+    x_samples, _ = prior._stickbreak_forward(y_samples)
+    return (x_samples,)
+
+
+@app.cell
+def _(np, x_samples):
+    assert np.allclose(np.sum(x_samples, axis=1), 1.0)
+    return
+
+
+@app.cell
+def _(b_true, blend_fprints, draw_simplex, pv_fprints, x_samples):
+    draw_simplex(
+        x_samples, pv_fprints, blend_fprints, 
+        b_true=b_true, do_scatter=False, do_kde=True
+    )
     return
 
 
