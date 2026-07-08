@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.17.6"
+__generated_with = "0.20.4"
 app = marimo.App()
 
 
@@ -17,6 +17,7 @@ def _():
     import seaborn as sns
     import statsmodels.api as sm
     import matplotlib as mpl
+    from scipy.special import logit, expit
     from dataclasses import dataclass
     import pocomc as pc
     import scipy
@@ -27,7 +28,7 @@ def _():
     theme = load_theme("umbra_light")
     theme.apply()
     plt.rc('font', size=16)
-    return MultipleLocator, mo, np, pc, pd, plt, scipy, sns
+    return MultipleLocator, expit, mo, np, pc, pd, plt, scipy, sns
 
 
 @app.cell
@@ -284,11 +285,125 @@ def _(pd):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     # prior
+
+    first illustrate stick breaking. see [here](https://mc-stan.org/docs/2_18/reference-manual/simplex-transform-section.html).
     """)
+    return
+
+
+@app.cell
+def _(expit, np):
+    def z_of_y(y):
+        """
+        returns z, proportion of stick broken off in step 1 <= k < K.
+        y: the inference variable that is in (-inf, inf)
+        """
+        K = np.size(y) + 1
+        return expit(y + np.log(1.0 / (K - np.arange(1, K))))
+
+    return (z_of_y,)
+
+
+@app.cell
+def _(np):
+    def x_of_z(z):
+        """
+        returns x, the blend make-up
+        z: proportion of stick broken off in each step
+        """
+        K = np.size(z) + 1
+        x = np.zeros(K)
+        for i in range(K-1):
+            x[i] = z[i] * (1.0 - np.sum(x[:i]))
+        x[-1] = 1.0 - sum(x[:-1])
+        return x
+
+    return (x_of_z,)
+
+
+@app.cell
+def _(x_of_z, z_of_y):
+    def x_of_y(y):
+        z = z_of_y(y)
+        return x_of_z(z)
+
+    return (x_of_y,)
+
+
+@app.cell
+def _(np):
+    toy_y = np.array([-3.0, 4.0])
+    toy_y
+    return (toy_y,)
+
+
+@app.cell
+def _(toy_y, z_of_y):
+    toy_z = z_of_y(toy_y)
+    toy_z
+    return (toy_z,)
+
+
+@app.cell
+def _(np):
+    x = np.ones(3)
+    x[:3]
+    return
+
+
+@app.cell
+def _(toy_x):
+    toy_x[:-1]
+    return
+
+
+@app.cell
+def _(toy_z, x_of_z):
+    toy_x = x_of_z(toy_z)
+    toy_x
+    return (toy_x,)
+
+
+@app.cell
+def _(np, toy_x, toy_z):
+    assert toy_x[0] == toy_z[0]
+    assert np.isclose(1.0, np.sum(toy_x))
+    return
+
+
+@app.cell
+def _(np, x_of_y):
+    uniform_x = x_of_y(np.zeros(4))
+    assert np.size(uniform_x) == 5
+    assert np.allclose(uniform_x, 1/5)
+    return
+
+
+@app.cell
+def _(np, plt, x_of_z, z_of_y):
+    plt.figure()
+    _ys = np.linspace(-4.0, 4.0, 100)
+    _zs = [z_of_y([y0], 2)[0] for y0 in _ys]
+    _xs = [x_of_z([z0]) for z0 in _zs]
+    plt.plot(_ys, _zs)
+    plt.ylabel("proportion of stick broken, $z_1$")
+    plt.xlabel("new variable, $y_1$")
+    plt.title("K=2")
+    plt.show()
+    _xs
+    return
+
+
+@app.cell
+def _(np, z_of_y):
+    z_test = z_of_y(np.array([0, 0]), 3)
+    assert z_test[0] == 1 / 3
+    assert z_test[1] == 1 / 2 # see stan docs
+    z_test
     return
 
 
@@ -319,6 +434,7 @@ def _(np):
 def _(np):
     def log_likelihood(x):
         return -np.sum(10.0 * (x[:, ::2] ** 2.0 - x[:, 1::2]) ** 2.0 + (x[:, ::2] - 1.0) ** 2.0, axis=1)
+
     return
 
 
