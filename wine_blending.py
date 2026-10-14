@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.17.6"
 app = marimo.App()
 
 
@@ -14,7 +14,7 @@ def _():
     import matplotlib.colors as mcolors
     import pandas as pd
     from mpltern.datasets import get_triangular_grid
-    import pyvista as pv
+    # import pyvista as pv
     import seaborn as sns
     import statsmodels.api as sm
     import matplotlib as mpl
@@ -37,7 +37,6 @@ def _():
         np,
         pd,
         plt,
-        pv,
         scipy,
         sm,
         sns,
@@ -63,6 +62,9 @@ def _(colors):
         "Cab. Sauv.": colors[0],
         "Merlot": colors[1],
         "Cab. Franc": colors[2],
+
+        "Sauv. Blanc": "gold",
+        "Bordeaux Blanc": "darkgoldenrod",
 
         # blends
         0: colors[3],
@@ -180,7 +182,6 @@ def _(np):
             np.linalg.norm(x_a) * np.linalg.norm(x_b)
         )
         return np.acos(cos_theta) * 180 / np.pi
-
     return (fingerprint_angles,)
 
 
@@ -262,7 +263,7 @@ def _(mo):
 def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
     def _draw_lollipop(ax, x, y, color):
         ax.plot([x, x], [0, y], color=color, zorder=100)
-        ax.scatter([x], [y], color=color, zorder=100, s=8**2)
+        ax.scatter([x], [y], color=color, zorder=100, s=8**2, clip_on=False)
 
     constituent_to_ymax = { # use later
         'alcohol [vol. %]': 15.0,
@@ -270,7 +271,7 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
         'acid [g/L]': 6.1
     }
 
-    def viz_features(pv_fprints, blend_fprints):
+    def viz_features(pv_fprints, blend_fprints, constituent_to_ymax):
         wines = pv_fprints.index
         n_wines = len(wines)
         constituents = pv_fprints.columns
@@ -334,8 +335,8 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
         plt.savefig(_savename + ".pdf", format="pdf")
         return fig
 
-    viz_features(pv_fprints, blend_fprints)
-    return (constituent_to_ymax,)
+    viz_features(pv_fprints, blend_fprints, constituent_to_ymax)
+    return constituent_to_ymax, viz_features
 
 
 @app.cell(hide_code=True)
@@ -374,7 +375,6 @@ def _(plt, wine_to_color):
         if savename:
             plt.savefig(blend_text + ".pdf", format="pdf", bbox_inches="tight")
         plt.show()
-
     return (viz_makeup_pie,)
 
 
@@ -405,7 +405,6 @@ def _(dataclass, pd):
             c1 = self.pv_fprints.columns
             c2 = self.blend_fprint.index
             assert all(c1 == c2)
-
     return (WineBlendingProb,)
 
 
@@ -455,7 +454,6 @@ def _(np):
         assert W.shape == (M, M)
 
         return W, A, b
-
     return (build_linear_system,)
 
 
@@ -480,7 +478,6 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
-
     return (assert_feasible_vol_fracs,)
 
 
@@ -696,7 +693,6 @@ def _(
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
-
     return (constrained_tls_soln,)
 
 
@@ -831,7 +827,6 @@ def _(WineBlendingProb, np, sigmas):
             blend_fprint,
             sigmas
         )
-
     return (sample_perturbed_problem,)
 
 
@@ -873,7 +868,6 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
-
     return (sample_perturbed_solutions,)
 
 
@@ -1264,7 +1258,7 @@ def _(plt, sns, wine_to_color):
             ax.tick_params(axis='x', labelrotation=90)
             ax.axhline(sigmas[constituent], color="gray", linestyle="--")
             ax.axhline(-sigmas[constituent], color="gray", linestyle="--")
-        
+
             # shade every other wine-group band to visually separate them
             for j in [1, 3]:
                 ax.axvspan(
@@ -1274,7 +1268,6 @@ def _(plt, sns, wine_to_color):
         plt.tight_layout()
         plt.savefig("corrections.pdf", format="pdf")
         plt.show()
-
     return (viz_corrections,)
 
 
@@ -1303,7 +1296,6 @@ def _(pv):
                 tip_resolution=50
         )
         pl.add_mesh(arrow, color=color)
-
     return (draw_vector,)
 
 
@@ -1358,7 +1350,6 @@ def _(
         )
 
         pl.show()
-
     return (viz_setup,)
 
 
@@ -1541,6 +1532,113 @@ def _():
         print("V reduction: ", (1 - V_new / (2 * V)) * 100)
 
     excess_volume2()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # white wine un-blending
+    """)
+    return
+
+
+@app.cell
+def _():
+    wwb_true_makeup = [
+        {"Sauv. Blanc": 0.5}, 
+        {"Sauv. Blanc": 0.15}, 
+        {"Sauv. Blanc": 0.85}, 
+        {"Sauv. Blanc": 0.4}
+    ]
+
+    for _entry in wwb_true_makeup:
+        _entry["Bordeaux Blanc"] = 1.0 - _entry["Sauv. Blanc"]
+    wwb_true_makeup
+    return
+
+
+@app.cell
+def _(pd):
+    wblend_fprints = pd.DataFrame(
+        {
+            "alcohol [vol. %]": [12.10, 12.11, 12.10, 12.09],
+            "sugar [g/L]": [2.2, 1.02, 3.45, 1.86],
+            "acid [g/L]": [6.95, 6.71, 7.78, 6.52]
+        }
+    )
+    wblend_fprints
+    return (wblend_fprints,)
+
+
+@app.cell
+def _():
+    wconstituent_to_ymax = { # use later
+        'alcohol [vol. %]': 13.0,
+        'sugar [g/L]': 4.0, 
+        'acid [g/L]': 8.0
+    }
+    return (wconstituent_to_ymax,)
+
+
+@app.cell
+def _(pd):
+    wpv_fprints = pd.DataFrame(
+           {
+            "alcohol [vol. %]": [12.16, 12.08],
+            "sugar [g/L]": [0.48, 3.95],
+            "acid [g/L]": [6.12, 7.63]
+        },
+        index=["Bordeaux Blanc", "Sauv. Blanc"]
+    )
+    wpv_fprints
+    return (wpv_fprints,)
+
+
+@app.cell
+def _(viz_features, wblend_fprints, wconstituent_to_ymax, wpv_fprints):
+    viz_features(wpv_fprints, wblend_fprints, wconstituent_to_ymax)
+    return
+
+
+@app.cell
+def _(WineBlendingProb, sigmas, wblend_fprints, wpv_fprints):
+    wwbps = [
+        WineBlendingProb(wpv_fprints, wblend_fprints.loc[b, :], sigmas)
+        for b in range(4)
+    ]
+    return (wwbps,)
+
+
+@app.cell
+def _(sample_perturbed_solutions, wwbps):
+    wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wwbps]
+    return
+
+
+@app.cell
+def _(plt):
+    def viz_white_wine_unblending():
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        # ax.plot(x, y)
+    
+        # Bottom axis: % Sauvignon Blanc (0 → 1)
+        ax.set_xlim(0, 1)
+        ax.set_xlabel("Sauvignon Blanc")
+        # ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))
+    
+        # Top axis: % Chardonnay (1 → 0), mapped as 1 - x
+        top = ax.secondary_xaxis(
+            "top", functions=(lambda v: 1 - v, lambda v: 1 - v)
+        )
+        top.set_xlabel("Chardonnay")
+        # top.xaxis.set_major_formatter(PercentFormatter(xmax=1))
+    
+        ax.set_ylabel("Your metric")
+        fig.tight_layout()
+        plt.show()
+
+    viz_white_wine_unblending()
     return
 
 
