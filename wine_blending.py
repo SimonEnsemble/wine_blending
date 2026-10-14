@@ -26,7 +26,7 @@ def _():
 
     theme = load_theme("umbra_light")
     theme.apply()
-    plt.rc('font', size=16)
+    plt.rc('font', size=15)
     return (
         Line2D,
         MultipleLocator,
@@ -261,7 +261,14 @@ def _(mo):
 
 
 @app.cell
-def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
+def _(
+    blend_fprints,
+    blend_to_makeup_string,
+    incl_blends_checkbox,
+    plt,
+    pv_fprints,
+    wine_to_color,
+):
     def _draw_lollipop(ax, x, y, color):
         ax.plot([x, x], [0, y], color=color, zorder=100)
         ax.scatter([x], [y], color=color, zorder=100, s=8**2, clip_on=False)
@@ -272,7 +279,10 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
         'acid [g/L]': 6.1
     }
 
-    def viz_features(pv_fprints, blend_fprints, constituent_to_ymax):
+    def viz_features(
+        pv_fprints, blend_fprints, constituent_to_ymax=constituent_to_ymax, 
+        savename=None, blend_to_makeup_string=blend_to_makeup_string
+    ):
         wines = pv_fprints.index
         n_wines = len(wines)
         constituents = pv_fprints.columns
@@ -285,7 +295,7 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
         if incl_blends_checkbox.value:
             figsize[0] *= 1.1
 
-        fig, axs = plt.subplots(1, 3, figsize=figsize)
+        fig, axs = plt.subplots(1, len(constituents), figsize=figsize)
 
         for c, constituent in enumerate(constituents):
             axs[c].minorticks_off()
@@ -301,7 +311,7 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
             if incl_blends_checkbox.value:
                 d = 1 # spacing
                 for blend_id in range(n_blends):
-                    conc = blend_fprints.loc[blend_id, constituent]
+                    conc = blend_fprints.iloc[blend_id][constituent]
                     _draw_lollipop(
                         axs[c], 
                         n_wines + blend_id + d, conc, 
@@ -310,7 +320,7 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
 
                 xticks = xticks + list(range(n_wines+d, n_wines+n_blends+d))
                 xticklabels = xticklabels + [
-                    f"blend {b+1}" for b in range(n_blends)
+                    blend_to_makeup_string[b] for b in range(n_blends)
                 ]
 
                 # highlight blends to distinguish them
@@ -327,16 +337,16 @@ def _(blend_fprints, incl_blends_checkbox, plt, pv_fprints, wine_to_color):
             axs[c].set_ylim(0.0, constituent_to_ymax[constituent])
         plt.tight_layout()
 
-        _savename = "features"
-        if incl_blends_checkbox.value:
-            _savename += "_w_blends"
-        else:
-            _savename += "_wo_blends"
-
-        plt.savefig(_savename + ".pdf", format="pdf")
+        if savename is not None:
+            if incl_blends_checkbox.value:
+                savename += "_w_blends"
+            else:
+                savename += "_wo_blends"
+    
+            plt.savefig(savename + ".pdf", format="pdf")
         return fig
 
-    viz_features(pv_fprints, blend_fprints, constituent_to_ymax)
+    viz_features(pv_fprints, blend_fprints, constituent_to_ymax=constituent_to_ymax)
     return constituent_to_ymax, viz_features
 
 
@@ -359,6 +369,20 @@ def _(pd):
     )
     blend_makeup
     return (blend_makeup,)
+
+
+@app.cell
+def _(blend_makeup, pv_fprints):
+    _wines = pv_fprints.index
+    def abbrev(s):
+        return "".join(word[0].upper() for word in s.split())
+
+    blend_to_makeup_string = [
+        f"{blend_makeup.loc[b, _wines[0]]*100:.0f}%{abbrev(_wines[0])}  {blend_makeup.loc[b, _wines[1]]*100:.0f}%{abbrev(_wines[1])} {blend_makeup.loc[b, _wines[2]]*100:.0f}%{abbrev(_wines[2])}"
+        for b in range(4)
+    ]
+    blend_to_makeup_string
+    return (blend_to_makeup_string,)
 
 
 @app.cell
@@ -1549,6 +1573,8 @@ def _():
 def _(mo):
     mo.md(r"""
     # white wine un-blending
+
+    ## true make-up
     """)
     return
 
@@ -1556,29 +1582,37 @@ def _(mo):
 @app.cell
 def _():
     wwb_true_makeup = [
-        {"Sauv. Blanc": 0.5}, 
         {"Sauv. Blanc": 0.15}, 
-        {"Sauv. Blanc": 0.85}, 
-        {"Sauv. Blanc": 0.4}
+        {"Sauv. Blanc": 0.4}, 
+        {"Sauv. Blanc": 0.5}, 
+        {"Sauv. Blanc": 0.85}
     ]
+
+    # reorder. sort by composition
+    wblend_perumutation = [1, 3, 0, 2]
 
     for _entry in wwb_true_makeup:
         _entry["Bordeaux Blanc"] = 1.0 - _entry["Sauv. Blanc"]
     wwb_true_makeup
-    return (wwb_true_makeup,)
+    return wblend_perumutation, wwb_true_makeup
 
 
 @app.cell
-def _(pd):
-    wblend_fprints = pd.DataFrame(
-        {
-            "alcohol [vol. %]": [12.10, 12.11, 12.10, 12.09],
-            "sugar [g/L]": [2.2, 1.02, 3.45, 1.86],
-            "acid [g/L]": [6.95, 6.71, 7.78, 6.52]
-        }
-    )
-    wblend_fprints
-    return (wblend_fprints,)
+def _(wwb_true_makeup):
+    wblend_to_makeup_string = [
+        f"{wwb_true_makeup[b]["Bordeaux Blanc"]*100:.0f}%BB {wwb_true_makeup[b]["Sauv. Blanc"]*100:.0f}%SB"
+        for b in range(4)
+    ]
+    wblend_to_makeup_string
+    return (wblend_to_makeup_string,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## fingerprints
+    """)
+    return
 
 
 @app.cell
@@ -1586,14 +1620,39 @@ def _():
     wconstituent_to_ymax = { # use later
         'alcohol [vol. %]': 13.0,
         'sugar [g/L]': 4.0, 
-        'acid [g/L]': 8.0
+        'acid [g/L]': 8.0,
+        "abs. [280 nm]": 8.0, 
+        "abs. [320 nm]": 5.0
     }
     return (wconstituent_to_ymax,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### chemistry (alcohol, sugar, acid)
+    """)
+    return
+
+
+@app.cell
+def _(pd, wblend_perumutation):
+    wblend_fprints_chem = pd.DataFrame(
+        {
+            "alcohol [vol. %]": [12.10, 12.11, 12.10, 12.09],
+            "sugar [g/L]": [2.2, 1.02, 3.45, 1.86],
+            "acid [g/L]": [6.95, 6.71, 7.78, 6.52]
+        }
+    )
+    wblend_fprints_chem = wblend_fprints_chem.iloc[
+        wblend_perumutation, :].reset_index(drop=True)
+    wblend_fprints_chem
+    return (wblend_fprints_chem,)
+
+
 @app.cell
 def _(pd):
-    wpv_fprints = pd.DataFrame(
+    wpv_fprints_chem = pd.DataFrame(
            {
             "alcohol [vol. %]": [12.16, 12.08],
             "sugar [g/L]": [0.48, 3.95],
@@ -1601,76 +1660,18 @@ def _(pd):
         },
         index=["Bordeaux Blanc", "Sauv. Blanc"]
     )
-    wpv_fprints
-    return (wpv_fprints,)
-
-
-@app.cell
-def _(viz_features, wblend_fprints, wconstituent_to_ymax, wpv_fprints):
-    viz_features(wpv_fprints, wblend_fprints, wconstituent_to_ymax)
-    return
-
-
-@app.cell
-def _(WineBlendingProb, sigmas, wblend_fprints, wpv_fprints):
-    wwbps = [
-        WineBlendingProb(wpv_fprints, wblend_fprints.loc[b, :], sigmas)
-        for b in range(4)
-    ]
-    return (wwbps,)
-
-
-@app.cell
-def _(sample_perturbed_solutions, wwbps):
-    wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wwbps]
-    return (wwbp_solns,)
-
-
-@app.cell
-def _(plt, sns, wine_to_color, wwb_true_makeup, wwbp_solns, wwbps):
-    def viz_white_wine_unblending(wwbps, wwbp_solns):
-        wines = wwbps[0].pv_fprints.index
-    
-        fig, ax = plt.subplots()
-
-        ax.set_xlim(0, 1)
-        ax.set_xlabel(wines[0] + " [volume fraction]")
-
-        top = ax.secondary_xaxis(
-            "top", functions=(lambda v: 1 - v, lambda v: 1 - v)
-        )
-        top.set_xlabel(wines[1] + " [volume fraction]")
-
-        ax.set_ylabel("density")
-        ax.set_yticks([0])
-
-        for b in range(4):
-            # distribution of predicted make-ups
-            vs = [x[0] for x in wwbp_solns[b]]
-
-            plt.axvline(
-                wwb_true_makeup[b][wines[0]], color=wine_to_color[b], linestyle="--"
-            )
-            sns.kdeplot(
-                vs, ax=ax, clip=(0, 1), fill=True, alpha=0.4, label=f"{b}",
-                color=wine_to_color[b]
-            )
-        
-        ax.legend(
-            title="blend", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False
-        )
-    
-        fig.tight_layout()
-        plt.show()
-
-    viz_white_wine_unblending(wwbps, wwbp_solns)
-    return (viz_white_wine_unblending,)
+    wpv_fprints_chem
+    return (wpv_fprints_chem,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## with UV/viz spectra
+    ### UV-viz sec
+
+    280 nm is the standard total-phenolics index. It measures the aromatic rings in essentially all phenolic compounds and is the usual single number for a wine’s phenolic load.
+
+    320 nm is the white-wine-specific band. It mainly reflects hydroxycinnamic acids (caftaric, coutaric, fertaric acid and their derivatives), which are the dominant phenolics in white wines. Their levels depend strongly on grape variety and on how the juice was handled, so 320 nm is often the most varietally distinctive wavelength for whites.
     """)
     return
 
@@ -1695,6 +1696,7 @@ def _(pd):
 
         out = df.set_index("Name")[abs_cols]
         out.columns = [f"abs. [{w} nm]" for w in wavelengths]
+
         return out
     
     raw_spec_data = read_uv_viz_data()
@@ -1721,19 +1723,6 @@ def _(spec_data):
 
 
 @app.cell
-def _(blend_fprints):
-    blend_fprints
-    return
-
-
-@app.cell
-def _(spec_data):
-    wblend_fprints_spec = spec_data.loc[["B1", "B2", "B3", "B4"]]
-    wblend_fprints_spec
-    return (wblend_fprints_spec,)
-
-
-@app.cell
 def _(group, raw_spec_data):
     spec_data_sigma_data = raw_spec_data.groupby(group).std()
 
@@ -1752,58 +1741,140 @@ def _(sigma_spec):
 
 
 @app.cell
-def _(wpv_fprints_spec):
-    wpv_fprints_spec
+def _(spec_data, wblend_perumutation):
+    wblend_fprints_spec = spec_data.loc[["B1", "B2", "B3", "B4"]]
+    wblend_fprints_spec = wblend_fprints_spec.iloc[wblend_perumutation, :].reset_index(drop=True)
+
+    wblend_fprints_spec
+    return (wblend_fprints_spec,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## un-mix
+    """)
     return
 
 
-@app.cell
-def _(sigma_spec):
-    sigma_spec
-    return
+@app.cell(hide_code=True)
+def _(mo):
+    ww_fp = mo.ui.dropdown(options=["chemistry", "UV-viz", "both"], label="choose white wine FP", value="both")
+    ww_fp
+    return (ww_fp,)
 
 
 @app.cell
-def _(WineBlendingProb, sigma_spec, wblend_fprints_spec, wpv_fprints_spec):
-    wblending_prob_spec = WineBlendingProb(
-        wpv_fprints_spec, wblend_fprints_spec.iloc[0], sigma_spec
-    )
-    return (wblending_prob_spec,)
+def _(
+    pd,
+    sigma_spec,
+    sigmas,
+    wblend_fprints_chem,
+    wblend_fprints_spec,
+    wpv_fprints_chem,
+    wpv_fprints_spec,
+    ww_fp,
+):
+    if ww_fp.value == "chemistry":
+        wpv_fprints = wpv_fprints_chem
+        wblend_fprints = wblend_fprints_chem
+    elif ww_fp.value == "UV-viz":
+        wpv_fprints = wpv_fprints_spec
+        wblend_fprints = wblend_fprints_spec
+    elif ww_fp.value == "both":
+        wpv_fprints = pd.concat([wpv_fprints_chem, wpv_fprints_spec], axis=1)
+        wblend_fprints = pd.concat([wblend_fprints_chem, wblend_fprints_spec], axis=1)
+
+    wsigmas = sigmas | sigma_spec
+    wsigmas
+    return wblend_fprints, wpv_fprints, wsigmas
 
 
 @app.cell
-def _(sample_perturbed_solutions, wblending_prob_spec):
-    sample_perturbed_solutions(wblending_prob_spec)
-    return
-
-
-@app.cell
-def _(constrained_tls_soln, wblending_prob_spec):
-    wx_tls_spec, wdelta_Ab_spec = constrained_tls_soln(
-        wblending_prob_spec, verbose=True, run_checks=True
-    )
-    wx_tls_spec
-    return
-
-
-@app.cell
-def _(WineBlendingProb, sigma_spec, wblend_fprints_spec, wpv_fprints_spec):
-    wwbps_spec = [
-        WineBlendingProb(wpv_fprints_spec, wblend_fprints_spec.iloc[b], sigma_spec)
+def _(WineBlendingProb, wblend_fprints, wpv_fprints, wsigmas):
+    wwbps = [
+        WineBlendingProb(wpv_fprints, wblend_fprints.loc[b, :], wsigmas)
         for b in range(4)
     ]
-    return (wwbps_spec,)
+    return (wwbps,)
 
 
 @app.cell
-def _(sample_perturbed_solutions, wwbps_spec):
-    wwbp_solns_spec = [sample_perturbed_solutions(wwbp) for wwbp in wwbps_spec]
-    return (wwbp_solns_spec,)
+def _(
+    viz_features,
+    wblend_fprints,
+    wblend_to_makeup_string,
+    wconstituent_to_ymax,
+    wpv_fprints,
+):
+    viz_features(
+        wpv_fprints, wblend_fprints, constituent_to_ymax=wconstituent_to_ymax,
+        blend_to_makeup_string=wblend_to_makeup_string
+    )
+    return
 
 
 @app.cell
-def _(viz_white_wine_unblending, wwbp_solns_spec, wwbps_spec):
-    viz_white_wine_unblending(wwbps_spec, wwbp_solns_spec)
+def _(sample_perturbed_solutions, wwbps):
+    wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wwbps]
+    return (wwbp_solns,)
+
+
+@app.cell
+def _(
+    np,
+    plt,
+    sns,
+    wblend_to_makeup_string,
+    wine_to_color,
+    wwb_true_makeup,
+    wwbp_solns,
+    wwbps,
+):
+    def viz_white_wine_unblending(wwbps, wwbp_solns, wblend_to_makeup_string):
+        wines = wwbps[0].pv_fprints.index
+    
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+        ax.set_xlim(0, 1)
+        ax.set_xlabel(wines[0] + " [volume fraction]")
+
+        top = ax.secondary_xaxis(
+            "top", functions=(lambda v: 1 - v, lambda v: 1 - v)
+        )
+        top.set_xlabel(wines[1] + " [volume fraction]")
+
+        ax.set_ylabel("density")
+        ax.set_yticks([0])
+
+        for b in range(4):
+            # distribution of predicted make-ups
+            vs = [x[0] for x in wwbp_solns[b]]
+            print(f"blend {b} {np.mean(vs)*100:.1f}+/-{np.std(vs)*100:.1f}%")
+
+            plt.axvline(
+                wwb_true_makeup[b][wines[0]], color=wine_to_color[b], linestyle="--"
+            )
+            sns.kdeplot(
+                vs, ax=ax, clip=(0, 1), fill=True, alpha=0.4, 
+                label=wblend_to_makeup_string[b],
+                color=wine_to_color[b]
+            )
+        
+        ax.legend(
+            title="blend", loc="center left", bbox_to_anchor=(1.02, 0.5), 
+            frameon=False, fontsize=10
+        )
+    
+        fig.tight_layout()
+        plt.show()
+
+    viz_white_wine_unblending(wwbps, wwbp_solns, wblend_to_makeup_string)
+    return
+
+
+@app.cell
+def _():
     return
 
 
