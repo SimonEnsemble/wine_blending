@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.17.6"
+__generated_with = "0.25.1"
 app = marimo.App()
 
 
@@ -182,6 +182,7 @@ def _(np):
             np.linalg.norm(x_a) * np.linalg.norm(x_b)
         )
         return np.acos(cos_theta) * 180 / np.pi
+
     return (fingerprint_angles,)
 
 
@@ -375,6 +376,7 @@ def _(plt, wine_to_color):
         if savename:
             plt.savefig(blend_text + ".pdf", format="pdf", bbox_inches="tight")
         plt.show()
+
     return (viz_makeup_pie,)
 
 
@@ -405,6 +407,7 @@ def _(dataclass, pd):
             c1 = self.pv_fprints.columns
             c2 = self.blend_fprint.index
             assert all(c1 == c2)
+
     return (WineBlendingProb,)
 
 
@@ -454,6 +457,7 @@ def _(np):
         assert W.shape == (M, M)
 
         return W, A, b
+
     return (build_linear_system,)
 
 
@@ -478,6 +482,7 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
+
     return (assert_feasible_vol_fracs,)
 
 
@@ -693,6 +698,7 @@ def _(
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
+
     return (constrained_tls_soln,)
 
 
@@ -801,7 +807,7 @@ def _(mo):
 
 
 @app.cell
-def _(WineBlendingProb, np, sigmas):
+def _(WineBlendingProb, np):
     def sample_perturbed_problem(blending_prob):
         # copy these b/c we'll change them
         pv_fprints = blending_prob.pv_fprints.copy()
@@ -825,8 +831,9 @@ def _(WineBlendingProb, np, sigmas):
         return WineBlendingProb(
             pv_fprints,
             blend_fprint,
-            sigmas
+            blending_prob.sigmas
         )
+
     return (sample_perturbed_problem,)
 
 
@@ -868,6 +875,7 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
+
     return (sample_perturbed_solutions,)
 
 
@@ -957,7 +965,6 @@ def _(
     do_trinary_kde,
     get_level,
     mpl,
-    my_density,
     np,
     plt,
     pv_fprints,
@@ -1023,7 +1030,7 @@ def _(
                 #     "", ["white", wine_to_color[blend_id]], N=N_levels+2,
                 # )
 
-                level = get_level(my_density, 0.90)
+                level = get_level(density, 0.90)
 
                 ax.tricontourf(
                     tn0, tn1, tn2, density,
@@ -1268,6 +1275,7 @@ def _(plt, sns, wine_to_color):
         plt.tight_layout()
         plt.savefig("corrections.pdf", format="pdf")
         plt.show()
+
     return (viz_corrections,)
 
 
@@ -1296,6 +1304,7 @@ def _(pv):
                 tip_resolution=50
         )
         pl.add_mesh(arrow, color=color)
+
     return (draw_vector,)
 
 
@@ -1350,6 +1359,7 @@ def _(
         )
 
         pl.show()
+
     return (viz_setup,)
 
 
@@ -1555,7 +1565,7 @@ def _():
     for _entry in wwb_true_makeup:
         _entry["Bordeaux Blanc"] = 1.0 - _entry["Sauv. Blanc"]
     wwb_true_makeup
-    return
+    return (wwb_true_makeup,)
 
 
 @app.cell
@@ -1613,37 +1623,187 @@ def _(WineBlendingProb, sigmas, wblend_fprints, wpv_fprints):
 @app.cell
 def _(sample_perturbed_solutions, wwbps):
     wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wwbps]
-    return
+    return (wwbp_solns,)
 
 
 @app.cell
-def _(plt):
-    def viz_white_wine_unblending():
-        fig, ax = plt.subplots(figsize=(7, 4.5))
-        # ax.plot(x, y)
+def _(plt, sns, wine_to_color, wwb_true_makeup, wwbp_solns, wwbps):
+    def viz_white_wine_unblending(wwbps, wwbp_solns):
+        wines = wwbps[0].pv_fprints.index
     
-        # Bottom axis: % Sauvignon Blanc (0 → 1)
+        fig, ax = plt.subplots()
+
         ax.set_xlim(0, 1)
-        ax.set_xlabel("Sauvignon Blanc")
-        # ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))
-    
-        # Top axis: % Chardonnay (1 → 0), mapped as 1 - x
+        ax.set_xlabel(wines[0] + " [volume fraction]")
+
         top = ax.secondary_xaxis(
             "top", functions=(lambda v: 1 - v, lambda v: 1 - v)
         )
-        top.set_xlabel("Chardonnay")
-        # top.xaxis.set_major_formatter(PercentFormatter(xmax=1))
+        top.set_xlabel(wines[1] + " [volume fraction]")
+
+        ax.set_ylabel("density")
+        ax.set_yticks([0])
+
+        for b in range(4):
+            # distribution of predicted make-ups
+            vs = [x[0] for x in wwbp_solns[b]]
+
+            plt.axvline(
+                wwb_true_makeup[b][wines[0]], color=wine_to_color[b], linestyle="--"
+            )
+            sns.kdeplot(
+                vs, ax=ax, clip=(0, 1), fill=True, alpha=0.4, label=f"{b}",
+                color=wine_to_color[b]
+            )
+        
+        ax.legend(
+            title="blend", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False
+        )
     
-        ax.set_ylabel("Your metric")
         fig.tight_layout()
         plt.show()
 
-    viz_white_wine_unblending()
+    viz_white_wine_unblending(wwbps, wwbp_solns)
+    return (viz_white_wine_unblending,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## with UV/viz spectra
+    """)
     return
 
 
 @app.cell
-def _():
+def _(pd):
+    def read_uv_viz_data(sheet_name="Table"):
+        path = "data/whitewineblendtrial.xlsx"
+        # Find the header row (first column == "#") to skip the instrument metadata
+        raw = pd.read_excel(path, sheet_name=sheet_name, header=None)
+        hdr = raw.index[raw.iloc[:, 0].astype(str).str.strip() == "#"][0]
+        df = pd.read_excel(path, sheet_name=sheet_name, header=hdr, na_values=["N/A"])
+        df = df.dropna(how="all").set_index("#")
+
+        # Drop blank rows
+        df = df[~df["Name"].str.startswith("Blank")]
+
+        # Keep only Abs. columns, renamed to their wavelength (e.g. 280)
+        abs_cols = [c for c in df.columns if c.startswith("Abs.")]
+        lam_cols = [c.replace("Abs.", "λ") for c in abs_cols]
+        wavelengths = df[lam_cols].iloc[0].astype(int).tolist()
+
+        out = df.set_index("Name")[abs_cols]
+        out.columns = [f"abs. [{w} nm]" for w in wavelengths]
+        return out
+    
+    raw_spec_data = read_uv_viz_data()
+    group = raw_spec_data.index.str.replace(r"\s+\d+$", "", regex=True)
+    raw_spec_data
+    return group, raw_spec_data
+
+
+@app.cell
+def _(group, raw_spec_data):
+    spec_data = raw_spec_data.groupby(group).mean()
+    spec_data = spec_data[["abs. [280 nm]", "abs. [320 nm]"]]
+    spec_data = spec_data.rename(index={"BB": "Bordeaux Blanc", "SB": "Sauv. Blanc"})
+    spec_data.index.name = "Name"
+    spec_data
+    return (spec_data,)
+
+
+@app.cell
+def _(spec_data):
+    wpv_fprints_spec = spec_data.loc[["Bordeaux Blanc", "Sauv. Blanc"]]
+    wpv_fprints_spec
+    return (wpv_fprints_spec,)
+
+
+@app.cell
+def _(blend_fprints):
+    blend_fprints
+    return
+
+
+@app.cell
+def _(spec_data):
+    wblend_fprints_spec = spec_data.loc[["B1", "B2", "B3", "B4"]]
+    wblend_fprints_spec
+    return (wblend_fprints_spec,)
+
+
+@app.cell
+def _(group, raw_spec_data):
+    spec_data_sigma_data = raw_spec_data.groupby(group).std()
+
+    # sigma_spec = spec_data_sigma_data.std().to_dict() # sensitive to outlier
+    dev = raw_spec_data - raw_spec_data.groupby(group).transform("median")
+    sigma_spec = (1.4826 * dev.abs().median()).to_dict()
+
+    spec_data_sigma_data
+    return (sigma_spec,)
+
+
+@app.cell
+def _(sigma_spec):
+    sigma_spec
+    return
+
+
+@app.cell
+def _(wpv_fprints_spec):
+    wpv_fprints_spec
+    return
+
+
+@app.cell
+def _(sigma_spec):
+    sigma_spec
+    return
+
+
+@app.cell
+def _(WineBlendingProb, sigma_spec, wblend_fprints_spec, wpv_fprints_spec):
+    wblending_prob_spec = WineBlendingProb(
+        wpv_fprints_spec, wblend_fprints_spec.iloc[0], sigma_spec
+    )
+    return (wblending_prob_spec,)
+
+
+@app.cell
+def _(sample_perturbed_solutions, wblending_prob_spec):
+    sample_perturbed_solutions(wblending_prob_spec)
+    return
+
+
+@app.cell
+def _(constrained_tls_soln, wblending_prob_spec):
+    wx_tls_spec, wdelta_Ab_spec = constrained_tls_soln(
+        wblending_prob_spec, verbose=True, run_checks=True
+    )
+    wx_tls_spec
+    return
+
+
+@app.cell
+def _(WineBlendingProb, sigma_spec, wblend_fprints_spec, wpv_fprints_spec):
+    wwbps_spec = [
+        WineBlendingProb(wpv_fprints_spec, wblend_fprints_spec.iloc[b], sigma_spec)
+        for b in range(4)
+    ]
+    return (wwbps_spec,)
+
+
+@app.cell
+def _(sample_perturbed_solutions, wwbps_spec):
+    wwbp_solns_spec = [sample_perturbed_solutions(wwbp) for wwbp in wwbps_spec]
+    return (wwbp_solns_spec,)
+
+
+@app.cell
+def _(viz_white_wine_unblending, wwbp_solns_spec, wwbps_spec):
+    viz_white_wine_unblending(wwbps_spec, wwbp_solns_spec)
     return
 
 
