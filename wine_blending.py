@@ -10,7 +10,7 @@ def _():
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
     import numpy as np
-    from matplotlib.ticker import MultipleLocator, AutoMinorLocator
+    from matplotlib.ticker import MultipleLocator, AutoMinorLocator, PercentFormatter, MaxNLocator
     import matplotlib.colors as mcolors
     import pandas as pd
     from mpltern.datasets import get_triangular_grid
@@ -21,15 +21,30 @@ def _():
     from dataclasses import dataclass
     import scipy
     import mpltern
-    from aquarel import load_theme
     from dataclasses import dataclass
 
-    theme = load_theme("umbra_light")
-    theme.apply()
-    plt.rc('font', size=15)
+    import scienceplots
+    plt.style.use(["science", "notebook"])
+    fs = 12
+    plt.rcParams.update({
+        'font.size': fs,
+        'axes.labelsize': fs,
+        'axes.titlesize': fs,
+        'xtick.labelsize': fs,
+        'ytick.labelsize': fs,
+        'legend.fontsize': fs,
+        'legend.title_fontsize': fs,
+        'figure.titlesize': fs,
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+        'xtick.top': False,
+        'ytick.right': False,
+    })
     return (
         Line2D,
+        MaxNLocator,
         MultipleLocator,
+        PercentFormatter,
         dataclass,
         get_triangular_grid,
         mo,
@@ -44,13 +59,8 @@ def _():
 
 
 @app.cell
-def _(plt, sns):
-    # colors = sns.color_palette("Set2")
-    colors = sns.color_palette(
-        plt.rcParams['axes.prop_cycle'].by_key()['color'] + [
-            sns.color_palette("Set2")[-1]
-        ]
-    )
+def _(sns):
+    colors = sns.color_palette("Set3")
     colors
     return (colors,)
 
@@ -58,19 +68,25 @@ def _(plt, sns):
 @app.cell
 def _(colors):
     wine_to_color = {
-        # pure variety
-        "Cab. Sauv.": colors[0],
-        "Merlot": colors[1],
-        "Cab. Franc": colors[2],
+        # parent
+        "Cab. Sauv.": colors[9],
+        "Merlot": colors[9],
+        "Cab. Franc": colors[9],
 
         "Sauv. Blanc": "gold",
-        "Bordeaux Blanc": "darkgoldenrod",
+        "Bordeaux Blanc": "gold",
 
-        # blends
-        0: colors[3],
-        1: colors[4],
-        2: colors[5],
-        3: colors[6]
+        # red blends
+        0: colors[0],
+        1: colors[2],
+        2: colors[3],
+        3: colors[4],
+    
+        # white blends
+        4: colors[5],
+        5: colors[6],
+        6: colors[7],
+        7: colors[8]
     }
     return (wine_to_color,)
 
@@ -227,8 +243,11 @@ def _(pd):
             "acid [g/L]": [5.73, 5.56, 5.69, 5.63]
         }
     )
+    blend_permutation = [1, 3, 2, 0]
+    blend_fprints = blend_fprints.iloc[
+        blend_permutation, :].reset_index(drop=True)
     blend_fprints
-    return (blend_fprints,)
+    return blend_fprints, blend_permutation
 
 
 @app.cell
@@ -262,6 +281,7 @@ def _(mo):
 
 @app.cell
 def _(
+    MaxNLocator,
     blend_fprints,
     blend_to_makeup_string,
     incl_blends_checkbox,
@@ -269,72 +289,108 @@ def _(
     pv_fprints,
     wine_to_color,
 ):
-    def _draw_lollipop(ax, x, y, color):
-        ax.plot([x, x], [0, y], color=color, zorder=100)
-        ax.scatter([x], [y], color=color, zorder=100, s=8**2, clip_on=False)
+    def _draw_lollipop(ax, pos, val, color):
+        ax.plot([0, val], [pos, pos], color=color, zorder=100)
+        ax.scatter([val], [pos], color=color, zorder=100, s=8**2, clip_on=False)
 
-    constituent_to_ymax = { # use later
+    constituent_to_xmax = {  # use later
         'alcohol [vol. %]': 15.0,
-        'sugar [g/L]': 5.05, 
+        'sugar [g/L]': 5.05,
         'acid [g/L]': 6.1
     }
 
     def viz_features(
-        pv_fprints, blend_fprints, constituent_to_ymax=constituent_to_ymax, 
+        pv_fprints, blend_fprints, constituent_to_xmax=constituent_to_xmax,
         savename=None, blend_to_makeup_string=blend_to_makeup_string
     ):
         wines = pv_fprints.index
         n_wines = len(wines)
+    
         constituents = pv_fprints.columns
         if incl_blends_checkbox.value:
             n_blends = blend_fprints.shape[0]
         else:
             n_blends = 0
 
-        figsize = [6.4, 4.8]
+        panel_w = 1.4        # inches per constituent panel
+        label_w = 1.2        # extra inches for the y tick labels + group labels
+        if incl_blends_checkbox.value:
+            label_w += 0.6   # blend makeup strings are wider than wine names
+
+        figsize = [label_w + panel_w * len(constituents), 3]
         if incl_blends_checkbox.value:
             figsize[0] *= 1.1
 
-        fig, axs = plt.subplots(1, len(constituents), figsize=figsize)
+        fig, axs = plt.subplots(
+            1, len(constituents), sharey=True, figsize=figsize
+        )
 
         for c, constituent in enumerate(constituents):
             axs[c].minorticks_off()
-            axs[c].xaxis.grid(False)
+            axs[c].yaxis.grid(False)
+            axs[c].xaxis.set_major_locator(MaxNLocator(nbins=4))
             for w, wine in enumerate(wines):
                 conc = pv_fprints.loc[wine, constituent]
                 _draw_lollipop(axs[c], w, conc, wine_to_color[wine])
 
-            xticks = list(range(n_wines))
-            xticklabels = list(wines)
-            xmax = n_wines - 0.5
+            yticks = list(range(n_wines))
+            yticklabels = list(wines)
+            ymax = n_wines - 0.5
 
             if incl_blends_checkbox.value:
-                d = 1 # spacing
+                d = 1  # spacing
                 for blend_id in range(n_blends):
+                    if n_wines == 2:
+                        color = wine_to_color[blend_id+4] # white
+                    else:
+                        color = wine_to_color[blend_id]
                     conc = blend_fprints.iloc[blend_id][constituent]
                     _draw_lollipop(
-                        axs[c], 
-                        n_wines + blend_id + d, conc, 
-                        wine_to_color[blend_id]
+                        axs[c],
+                        n_wines + blend_id + d, conc,
+                        color
                     )
 
-                xticks = xticks + list(range(n_wines+d, n_wines+n_blends+d))
-                xticklabels = xticklabels + [
+                yticks = yticks + list(range(n_wines + d, n_wines + n_blends + d))
+                yticklabels = yticklabels + [
                     blend_to_makeup_string[b] for b in range(n_blends)
                 ]
 
-                # highlight blends to distinguish them
-                axs[c].axvspan(
-                    n_wines+d - 0.5, 
-                    n_wines+n_blends+d, 
-                    color='gray', alpha=0.1, lw=0
-                )
-                xmax += n_blends + d
+                ymax += n_blends + d
 
-            axs[c].set_xticks(xticks, xticklabels, rotation=90)
-            axs[c].set_xlim(-0.5, xmax)
-            axs[c].set_ylabel(constituent)
-            axs[c].set_ylim(0.0, constituent_to_ymax[constituent])
+            axs[c].set_yticks(yticks, yticklabels)
+            axs[c].set_ylim(ymax, -0.5)  # inverted so first wine is at the top
+            axs[c].set_xlabel(constituent)
+            axs[c].set_xlim(0.0, constituent_to_xmax[constituent])
+
+        # label parent and blend
+        # measure how wide the tick labels are so the group labels clear them
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        max_w_px = max(
+            t.get_window_extent(renderer).width 
+            for t in axs[0].get_yticklabels()
+        )
+        pad_pts = 8
+        offset_pts = -(max_w_px * 72 / fig.dpi + pad_pts)
+
+        groups = [("parents", (n_wines - 1) / 2)]          # centered on the wines
+        if incl_blends_checkbox.value:
+            d = 1  # same spacing as above
+            groups.append(("blends", n_wines + d + (n_blends - 1) / 2))
+
+        for label, ypos in groups:
+            axs[0].annotate(
+                label,
+                xy=(0, ypos),
+                xycoords=axs[0].get_yaxis_transform(), # x axes coords, y data
+                xytext=(offset_pts, 0),
+                textcoords="offset points",
+                rotation=90, ha="right", va="center",
+                fontweight="bold",
+                annotation_clip=False,
+            )
+
         plt.tight_layout()
 
         if savename is not None:
@@ -342,12 +398,15 @@ def _(
                 savename += "_w_blends"
             else:
                 savename += "_wo_blends"
-    
+
             plt.savefig(savename + ".pdf", format="pdf")
         return fig
 
-    viz_features(pv_fprints, blend_fprints, constituent_to_ymax=constituent_to_ymax)
-    return constituent_to_ymax, viz_features
+    viz_features(
+        pv_fprints, blend_fprints, constituent_to_xmax=constituent_to_xmax,
+        savename="red_features"
+    )
+    return (viz_features,)
 
 
 @app.cell(hide_code=True)
@@ -359,7 +418,7 @@ def _(mo):
 
 
 @app.cell
-def _(pd):
+def _(blend_permutation, pd):
     blend_makeup = pd.DataFrame(
         {
             "Cab. Sauv.": [0.1, 0.7, 0.3, 0.6],
@@ -367,6 +426,8 @@ def _(pd):
             "Cab. Franc": [0.3, 0.2, 0.2, 0.0]
         }
     )
+    blend_makeup = blend_makeup.iloc[
+        blend_permutation, :].reset_index(drop=True)
     blend_makeup
     return (blend_makeup,)
 
@@ -376,11 +437,15 @@ def _(blend_makeup, pv_fprints):
     _wines = pv_fprints.index
     def abbrev(s):
         return "".join(word[0].upper() for word in s.split())
-
-    blend_to_makeup_string = [
-        f"{blend_makeup.loc[b, _wines[0]]*100:.0f}%{abbrev(_wines[0])}  {blend_makeup.loc[b, _wines[1]]*100:.0f}%{abbrev(_wines[1])} {blend_makeup.loc[b, _wines[2]]*100:.0f}%{abbrev(_wines[2])}"
-        for b in range(4)
-    ]
+    def makeup_string(b):
+        parts = []
+        for wine in _wines:
+            pct = round(blend_makeup.loc[b, wine] * 100)
+            if pct > 0:
+                parts.append(f"{pct}%{abbrev(wine)}")
+        return "  ".join(parts)
+    blend_to_makeup_string = [makeup_string(b) for b in range(4)]
+    blend_to_makeup_string[1] = blend_to_makeup_string[1] + "      "
     blend_to_makeup_string
     return (blend_to_makeup_string,)
 
@@ -981,9 +1046,11 @@ def _(mo):
 def _(
     Line2D,
     MultipleLocator,
+    PercentFormatter,
     WineBlendingProb,
     blend_fprints,
     blend_makeup,
+    blend_to_makeup_string,
     checkbox_kde,
     constrained_tls_soln,
     do_trinary_kde,
@@ -997,7 +1064,7 @@ def _(
     wine_to_color,
 ):
     def draw_simplex(
-        pv_fprints, blend_fprints, sigmas
+        pv_fprints, blend_fprints, sigmas, blend_to_makeup_string
     ):
         wines = pv_fprints.index
         n_blends = blend_fprints.shape[0]
@@ -1006,13 +1073,14 @@ def _(
 
         ax = plt.subplot(projection="ternary")
 
-        ax.set_tlabel(wines[0] + " [volume fraction]")
-        ax.set_llabel(wines[1] + " [volume fraction]")
-        ax.set_rlabel(wines[2] + " [volume fraction]")
+        ax.set_tlabel(wines[0] + " [volume %]")
+        ax.set_llabel(wines[1] + " [volume %]")
+        ax.set_rlabel(wines[2] + " [volume %]")
 
         for _ax in [ax.taxis, ax.laxis, ax.raxis]:
             _ax.set_label_position("tick1")
             _ax.set_major_locator(MultipleLocator(0.1))
+            _ax.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
 
         # ax.grid(which='both')
         ax.grid(which='major', linestyle='-', alpha=0.3)
@@ -1053,15 +1121,17 @@ def _(
                 # cmap = mcolors.LinearSegmentedColormap.from_list(
                 #     "", ["white", wine_to_color[blend_id]], N=N_levels+2,
                 # )
-
-                level = get_level(density, 0.90)
-
-                ax.tricontourf(
-                    tn0, tn1, tn2, density,
-                    levels=[level, density.max()],
-                    colors=[wine_to_color[blend_id]],
-                    alpha=0.4,
-                )
+        
+                levels = [get_level(density, l) for l in 
+                          [0.60, 0.70, 0.80, 0.90]
+                ]
+                for level in levels:
+                    ax.tricontourf(
+                        tn0, tn1, tn2, density,
+                        levels=[level, density.max()],
+                        colors=[wine_to_color[blend_id]],
+                        alpha=0.2,
+                    )
             else:
                 for s in range(len(x_tlss)):
                     ax.scatter(
@@ -1128,7 +1198,8 @@ def _(
         else:
             blend_handles = [
                 mpl.patches.Patch(
-                    color=wine_to_color[_blend_id], label=f"{_blend_id+1}"
+                    color=wine_to_color[_blend_id], 
+                    label=blend_to_makeup_string[_blend_id]
                 ) 
                 for _blend_id in range(n_blends)
             ]
@@ -1136,35 +1207,30 @@ def _(
             symbol_handles = [
                 Line2D(
                     [0], [0], marker='^', color='none', markeredgecolor='black',
-                    markerfacecolor='none', markersize=8, label='actual'
+                    markerfacecolor='none', markersize=markersize, label='actual'
                 ),
                 Line2D(
                     [0], [0], marker='*', color='none', markeredgecolor='black',
-                    markerfacecolor='none', markersize=10, label='predicted'
+                    markerfacecolor='none', markersize=markersize, label='predicted'
                 )
             ]
 
             leg1 = ax.legend(
                 handles=blend_handles, loc='upper left',
-                bbox_to_anchor=(0.95, 1.1), borderaxespad=0, title='blend',
-                prop={'size': 10}, title_fontsize=12
+                bbox_to_anchor=(0.75, 1.0), borderaxespad=0, title='blend',
+                prop={'size': 10}, title_fontsize=12, fontsize=10
             )
 
             leg2 = ax.legend(
                 handles=symbol_handles, loc='upper left',
-                bbox_to_anchor=(1.01, 1 - (len(blend_handles) + 1) * 0.06),
+                bbox_to_anchor=(0.9, 0.75),
                 borderaxespad=0, prop={'size': 10}
             )
 
             ax.add_artist(leg1)  # re-add first legend
-            # plt.legend(
-            #     handles=patches, title="blend", loc='upper right',
-            #     prop={'size': 10}, title_fontsize='small',
-            #     bbox_to_anchor=(1.05, 1.05)
-            # )
 
         plt.tight_layout()
-        _savename = "composition_triangle"
+        _savename = "red_unmix"
         if checkbox_kde.value:
             _savename += "_kde"
         else:
@@ -1173,7 +1239,7 @@ def _(
         plt.savefig(_savename + ".pdf", format="pdf")
         plt.show()
 
-    draw_simplex(pv_fprints, blend_fprints, sigmas)
+    draw_simplex(pv_fprints, blend_fprints, sigmas, blend_to_makeup_string)
     return
 
 
@@ -1231,7 +1297,7 @@ def _(
 
     corrections = analyze_corrections(pv_fprints, blend_fprints, sigmas)
     corrections.head()
-    return (corrections,)
+    return analyze_corrections, corrections
 
 
 @app.cell
@@ -1259,8 +1325,8 @@ def _(corrections):
 
 
 @app.cell
-def _(plt, sns, wine_to_color):
-    def viz_corrections(corrections, sigmas):
+def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
+    def viz_corrections(corrections, sigmas, blend_to_makeup_string):
         groups = corrections.groupby("constituent")
 
         constituents = corrections["constituent"].unique()
@@ -1290,22 +1356,95 @@ def _(plt, sns, wine_to_color):
             ax.axhline(sigmas[constituent], color="gray", linestyle="--")
             ax.axhline(-sigmas[constituent], color="gray", linestyle="--")
 
+            if i == 1:
+                handles, labels = ax.get_legend_handles_labels()
+                labels = [blend_to_makeup_string[int(l) - 1] for l in labels]
+                ax.legend(handles, labels, title="blend",
+                          fontsize=10, title_fontsize=12, ncol=1)
+
             # shade every other wine-group band to visually separate them
             for j in [1, 3]:
                 ax.axvspan(
                     j - 0.5, j + 0.5, color="gray", alpha=0.12, zorder=0
                 )
+            n_wines = group["wine"].nunique()
+            pad = 0.05  # in category units; increase if markers still touch
+            ax.set_xlim(-0.5 - pad, n_wines - 0.5 + pad)
 
         plt.tight_layout()
         plt.savefig("corrections.pdf", format="pdf")
         plt.show()
 
+    viz_corrections(corrections, sigmas, blend_to_makeup_string)
     return (viz_corrections,)
 
 
 @app.cell
-def _(corrections, sigmas, viz_corrections):
-    viz_corrections(corrections, sigmas)
+def _(plt, sns, wine_to_color):
+    def viz_corrections_h(corrections, sigmas, blend_to_makeup_string):
+        constituents = corrections["constituent"].unique()
+        palette = {i + 1: wine_to_color[i] for i in range(4)}
+        fig, axes = plt.subplots(
+            1, len(constituents), figsize=(3.4 * len(constituents), 4),
+            sharey=True,
+        )
+        for i, (ax, c) in enumerate(zip(axes, constituents)):
+            g = corrections[corrections["constituent"] == c]
+            ax.axvspan(-sigmas[c], sigmas[c], color="gray", alpha=0.15, lw=0, zorder=0)
+            ax.axvline(0, color="gray", lw=0.8, zorder=0)
+            sns.stripplot(
+                data=g, x="Δ", y="wine", hue="blend", ax=ax, dodge=True,
+                palette=palette, s=10, marker="X",
+            )
+            handles, labels = ax.get_legend_handles_labels()
+            ax.get_legend().remove()
+            if i == len(axes) - 1:
+                labels = [blend_to_makeup_string[int(l) - 1] for l in labels]
+                ax.legend(handles, labels, title="blend", fontsize=10,
+                          title_fontsize=12, loc="upper left",
+                          bbox_to_anchor=(1.02, 1))
+            ax.set_xlabel("Δ " + c)
+            ax.set_ylabel("")
+            ax.minorticks_off()
+        plt.tight_layout()
+        return fig
+
+    return (viz_corrections_h,)
+
+
+@app.cell
+def _(blend_to_makeup_string, corrections, sigmas, viz_corrections_h):
+    viz_corrections_h(corrections, sigmas, blend_to_makeup_string)
+    return
+
+
+@app.cell
+def _(blend_to_makeup_string, corrections, plt, sigmas, sns):
+    def viz_corrections_heatmap(corrections, sigmas, blend_to_makeup_string):
+        constituents = corrections["constituent"].unique()
+        wines = corrections["wine"].unique()
+        fig, axes = plt.subplots(
+            1, len(constituents), figsize=(3 * len(constituents), 3.8),
+            sharey=True, constrained_layout=True,
+        )
+        for i, (ax, c) in enumerate(zip(axes, constituents)):
+            g = corrections[corrections["constituent"] == c]
+            m = g.pivot_table(index="wine", columns="blend", values="Δ").reindex(wines) / sigmas[c]
+            sns.heatmap(
+                m, ax=ax, cmap="RdBu_r", center=0, vmin=-3, vmax=3,
+                annot=True, fmt=".1f", cbar=(i == len(axes) - 1),
+                cbar_kws={"label": "Δ / σ"},
+            )
+            ax.set_title(c)
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+            ax.set_xticklabels(
+                [blend_to_makeup_string[int(t.get_text()) - 1] for t in ax.get_xticklabels()],
+                rotation=90,
+            )
+        return fig
+
+    viz_corrections_heatmap(corrections, sigmas, blend_to_makeup_string)
     return
 
 
@@ -1600,7 +1739,7 @@ def _():
 @app.cell
 def _(wwb_true_makeup):
     wblend_to_makeup_string = [
-        f"{wwb_true_makeup[b]["Bordeaux Blanc"]*100:.0f}%BB {wwb_true_makeup[b]["Sauv. Blanc"]*100:.0f}%SB"
+        f"{wwb_true_makeup[b]['Bordeaux Blanc']*100:.0f}%BB {wwb_true_makeup[b]['Sauv. Blanc']*100:.0f}%SB"
         for b in range(4)
     ]
     wblend_to_makeup_string
@@ -1617,14 +1756,14 @@ def _(mo):
 
 @app.cell
 def _():
-    wconstituent_to_ymax = { # use later
+    wconstituent_to_xmax = { # use later
         'alcohol [vol. %]': 13.0,
         'sugar [g/L]': 4.0, 
         'acid [g/L]': 8.0,
         "abs. [280 nm]": 8.0, 
         "abs. [320 nm]": 5.0
     }
-    return (wconstituent_to_ymax,)
+    return (wconstituent_to_xmax,)
 
 
 @app.cell(hide_code=True)
@@ -1698,7 +1837,7 @@ def _(pd):
         out.columns = [f"abs. [{w} nm]" for w in wavelengths]
 
         return out
-    
+
     raw_spec_data = read_uv_viz_data()
     group = raw_spec_data.index.str.replace(r"\s+\d+$", "", regex=True)
     raw_spec_data
@@ -1804,12 +1943,12 @@ def _(
     viz_features,
     wblend_fprints,
     wblend_to_makeup_string,
-    wconstituent_to_ymax,
+    wconstituent_to_xmax,
     wpv_fprints,
 ):
     viz_features(
-        wpv_fprints, wblend_fprints, constituent_to_ymax=wconstituent_to_ymax,
-        blend_to_makeup_string=wblend_to_makeup_string
+        wpv_fprints, wblend_fprints, constituent_to_xmax=wconstituent_to_xmax,
+        blend_to_makeup_string=wblend_to_makeup_string, savename="white_features"
     )
     return
 
@@ -1822,6 +1961,9 @@ def _(sample_perturbed_solutions, wwbps):
 
 @app.cell
 def _(
+    Line2D,
+    PercentFormatter,
+    mpl,
     np,
     plt,
     sns,
@@ -1833,43 +1975,112 @@ def _(
 ):
     def viz_white_wine_unblending(wwbps, wwbp_solns, wblend_to_makeup_string):
         wines = wwbps[0].pv_fprints.index
-    
+
         fig, ax = plt.subplots(figsize=(6, 4))
 
         ax.set_xlim(0, 1)
-        ax.set_xlabel(wines[0] + " [volume fraction]")
+        ax.set_xlabel(wines[0] + " [volume %]")
 
         top = ax.secondary_xaxis(
             "top", functions=(lambda v: 1 - v, lambda v: 1 - v)
         )
-        top.set_xlabel(wines[1] + " [volume fraction]")
+        top.set_xlabel(wines[1] + " [volume %]")
 
         ax.set_ylabel("density")
         ax.set_yticks([0])
 
+        ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+        top.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+
+        ms = 10
         for b in range(4):
+            color = wine_to_color[b+4]
+        
             # distribution of predicted make-ups
             vs = [x[0] for x in wwbp_solns[b]]
             print(f"blend {b} {np.mean(vs)*100:.1f}+/-{np.std(vs)*100:.1f}%")
 
-            plt.axvline(
-                wwb_true_makeup[b][wines[0]], color=wine_to_color[b], linestyle="--"
+            # true comp
+            plt.scatter(
+                wwb_true_makeup[b][wines[0]], 0.0,
+                color=color, marker='^',
+                clip_on=False, s=ms**2
             )
+        
+            # predicted
+            plt.scatter(
+                np.mean(vs), 1.0,
+                color=color, marker='*',
+                s=ms**2,
+                clip_on=False, transform=ax.get_xaxis_transform()
+            )
+        
             sns.kdeplot(
                 vs, ax=ax, clip=(0, 1), fill=True, alpha=0.4, 
                 label=wblend_to_makeup_string[b],
-                color=wine_to_color[b]
+                color=color
             )
-        
+
         ax.legend(
             title="blend", loc="center left", bbox_to_anchor=(1.02, 0.5), 
             frameon=False, fontsize=10
         )
-    
-        fig.tight_layout()
+
+        blend_handles = [
+            mpl.patches.Patch(
+                color=wine_to_color[_blend_id+4], 
+                label=wblend_to_makeup_string[_blend_id]
+            ) 
+            for _blend_id in range(4)
+        ]
+
+        symbol_handles = [
+            Line2D(
+                [0], [0], marker='^', color='none', markeredgecolor='black',
+                markerfacecolor='none', markersize=ms, label='actual'
+            ),
+            Line2D(
+                [0], [0], marker='*', color='none', markeredgecolor='black',
+                markerfacecolor='none', markersize=ms, label='predicted'
+            )
+        ]
+
+        leg1 = ax.legend(
+            handles=blend_handles, loc='upper left',
+            bbox_to_anchor=(1.01, 0.8), borderaxespad=0, title='blend',
+            prop={'size': 10}, title_fontsize=12, fontsize=10
+        )
+        ax.add_artist(leg1)
+
+        leg2 = ax.legend(
+            handles=symbol_handles, loc='upper left',
+            bbox_to_anchor=(1.01, 0.3),
+            borderaxespad=0, prop={'size': 10}
+        )
+
+        # fig.tight_layout()
+        plt.savefig(
+            "white_unmix.pdf", format="pdf", 
+            bbox_extra_artists=(leg1, leg2, top, top.xaxis.label),
+            bbox_inches="tight"
+        )
         plt.show()
 
     viz_white_wine_unblending(wwbps, wwbp_solns, wblend_to_makeup_string)
+    return
+
+
+@app.cell
+def _(
+    analyze_corrections,
+    viz_corrections,
+    wblend_fprints,
+    wblend_to_makeup_string,
+    wpv_fprints,
+    wsigmas,
+):
+    wcorrections = analyze_corrections(wpv_fprints, wblend_fprints, wsigmas)
+    viz_corrections(wcorrections, wsigmas, wblend_to_makeup_string)
     return
 
 
