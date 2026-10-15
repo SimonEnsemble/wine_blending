@@ -613,6 +613,11 @@ def _(
 
                 delta_Ab = np.zeros((M, N+1))
                 return x, delta_Ab
+            else:
+                x = np.linalg.lstsq(A, b)[0]
+                x = x / np.sum(x)
+                return x
+            
 
         if run_checks:
             # ☑️ [A b] full rank
@@ -1831,6 +1836,8 @@ def _(spec_data, wblend_perumutation):
 def _(mo):
     mo.md(r"""
     ## un-mix
+
+    ### fingerprints
     """)
     return
 
@@ -1870,11 +1877,11 @@ def _(
 
 @app.cell
 def _(WineBlendingProb, wblend_fprints, wpv_fprints, wsigmas):
-    wwbps = [
+    wblending_probs = [
         WineBlendingProb(wpv_fprints, wblend_fprints.loc[b, :], wsigmas)
         for b in range(4)
     ]
-    return (wwbps,)
+    return (wblending_probs,)
 
 
 @app.cell
@@ -1892,9 +1899,17 @@ def _(
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### unmix
+    """)
+    return
+
+
 @app.cell
-def _(sample_perturbed_solutions, wwbps):
-    wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wwbps]
+def _(sample_perturbed_solutions, wblending_probs):
+    wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wblending_probs]
     return (wwbp_solns,)
 
 
@@ -1907,13 +1922,15 @@ def _(
     plt,
     sns,
     wblend_to_makeup_string,
+    wblending_probs,
     wine_to_color,
     wwb_true_makeup,
     wwbp_solns,
-    wwbps,
 ):
-    def viz_white_wine_unblending(wwbps, wwbp_solns, wblend_to_makeup_string):
-        wines = wwbps[0].pv_fprints.index
+    def viz_white_wine_unblending(
+        wblending_probs, wwbp_solns, wwb_true_makeup, wblend_to_makeup_string
+    ):
+        wines = wblending_probs[0].pv_fprints.index
 
         fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -2005,7 +2022,9 @@ def _(
         )
         plt.show()
 
-    viz_white_wine_unblending(wwbps, wwbp_solns, wblend_to_makeup_string)
+    viz_white_wine_unblending(
+        wblending_probs, wwbp_solns, wwb_true_makeup, wblend_to_makeup_string
+    )
     return
 
 
@@ -2022,6 +2041,94 @@ def _(
     viz_corrections(
         wcorrections, wsigmas, wblend_to_makeup_string, savename="white"
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### compare with naive
+    """)
+    return
+
+
+@app.cell
+def _(makeup):
+    makeup
+    return
+
+
+@app.cell
+def _(
+    PercentFormatter,
+    constrained_tls_soln,
+    np,
+    plt,
+    wblending_probs,
+    wwb_true_makeup,
+):
+    def compare_with_ols(
+        wblending_probs, wwb_true_makeup
+    ):
+        wx_tlss = [
+            constrained_tls_soln(
+                wblending_prob, verbose=True, run_checks=True
+            )[0]
+            for wblending_prob in wblending_probs
+        ]
+    
+        wx_olss = [
+            constrained_tls_soln(
+                wblending_prob, verbose=True, run_checks=True, use_naive_method=True
+            )
+            for wblending_prob in wblending_probs
+        ]
+
+        wines = wblending_probs[0].pv_fprints.index
+    
+        fig, ax = plt.subplots(figsize=(6, 4))
+
+        ax.set_xlim(0, 1)
+        ax.set_xlabel("true " + wines[0] + " [volume %]")
+
+        top = ax.secondary_xaxis(
+            "top", functions=(lambda v: 1 - v, lambda v: 1 - v)
+        )
+        top.set_xlabel("true " + wines[1] + " [volume %]")
+
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("pred. " + wines[0] + " [volume %]")
+        right = ax.secondary_yaxis(
+            "right", functions=(lambda v: 1 - v, lambda v: 1 - v)
+        )
+        right.set_ylabel("pred. " + wines[1] + " [volume %]")
+
+        ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+        top.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+    
+        ax.set_aspect('equal', 'box')
+
+        true_makeup = np.array([wwb_true_makeup[b][wines[0]] for b in range(4)])
+        tls_makeup = np.array([wx_tls[0] for wx_tls in wx_tlss])
+        ols_makeup = np.ravel(np.array([wx_ols[0] for wx_ols in wx_olss]))
+
+        tls_err = np.sqrt(np.mean((true_makeup - tls_makeup)**2))
+        ols_err = np.sqrt(np.mean((true_makeup - ols_makeup)**2))
+
+        plt.scatter(
+            true_makeup, tls_makeup, label=f"TLS (RMSE: {tls_err:.1%})",
+            facecolors="none", edgecolors="C0"
+        )
+        plt.scatter(
+            true_makeup,ols_makeup, label=f"OLS (RMSE: {ols_err:.1%})", 
+            marker="s", facecolors="none", edgecolors="C1"
+        )
+        plt.plot([0, 1], [0, 1], color="lightgray", linestyle="--", zorder=0)
+        plt.legend()
+
+        plt.show()
+
+    compare_with_ols(wblending_probs, wwb_true_makeup)
     return
 
 
