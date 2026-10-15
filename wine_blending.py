@@ -317,7 +317,9 @@ def _(
         if incl_blends_checkbox.value:
             label_w += 0.6   # blend makeup strings are wider than wine names
 
-        figsize = [label_w + panel_w * len(constituents), 3]
+        panel_h = 2 + 0.3 * n_wines
+
+        figsize = [label_w + panel_w * len(constituents), panel_h]
         if incl_blends_checkbox.value:
             figsize[0] *= 1.1
 
@@ -1326,126 +1328,63 @@ def _(corrections):
 
 @app.cell
 def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
-    def viz_corrections(corrections, sigmas, blend_to_makeup_string):
+    def viz_corrections(
+        corrections, sigmas, blend_to_makeup_string, savename=None
+    ):
         groups = corrections.groupby("constituent")
-
         constituents = corrections["constituent"].unique()
+        n = len(constituents)
 
         fig, axes = plt.subplots(
-            1, len(groups), figsize=(3.4 * len(groups), 5)
+            1, n, figsize=(3.0 * n + 1.0, 3), sharey=True, squeeze=False
         )
+        axes = axes[0]
 
-        palette = {i+1: wine_to_color[i] for i in range(4)}
-        markers = ['o', 's', '^', 'D']
+        palette = {i + 1: wine_to_color[i] for i in range(4)}
         for i, (ax, constituent) in enumerate(zip(axes, constituents)):
             group = groups.get_group(constituent)
             sns.stripplot(
-                group, x="wine", y="Δ", hue="blend", ax=ax, dodge=True,
+                data=group, x="Δ", y="wine", hue="blend", ax=ax, dodge=True,
                 palette=palette, s=10, marker="X"
             )
-            if i != 1:
-                ax.get_legend().remove()
-            else:
-                ax.legend(
-                    title="un-blending problem", fontsize=14, title_fontsize=14,
-                    ncol=2
-                )
-            ax.minorticks_off()
-            ax.set_ylabel("Δ " + constituent)
-            ax.tick_params(axis='x', labelrotation=90)
-            ax.axhline(sigmas[constituent], color="gray", linestyle="--")
-            ax.axhline(-sigmas[constituent], color="gray", linestyle="--")
 
-            if i == 1:
+            if i == n - 1:
+                # relabel seaborn's legend entries with the blend makeup strings
                 handles, labels = ax.get_legend_handles_labels()
                 labels = [blend_to_makeup_string[int(l) - 1] for l in labels]
-                ax.legend(handles, labels, title="blend",
-                          fontsize=10, title_fontsize=12, ncol=1)
-
-            # shade every other wine-group band to visually separate them
-            for j in [1, 3]:
-                ax.axvspan(
-                    j - 0.5, j + 0.5, color="gray", alpha=0.12, zorder=0
+                ax.legend(
+                    handles, labels, title="blend",
+                    loc="upper left", bbox_to_anchor=(1.02, 1),
+                    frameon=False,
                 )
+            else:
+                ax.get_legend().remove()
+
+            ax.minorticks_off()
+            ax.set_xlabel("Δ " + constituent)
+            ax.set_ylabel("")
+
+            # tolerance lines (now vertical)
+            ax.axvline(sigmas[constituent], color="gray", linestyle="--")
+            ax.axvline(-sigmas[constituent], color="gray", linestyle="--")
+
+            # shade every other wine band (now horizontal)
+            for j in [1, 3]:
+                ax.axhspan(j - 0.5, j + 0.5, color="gray", alpha=0.12, zorder=0)
+
             n_wines = group["wine"].nunique()
-            pad = 0.05  # in category units; increase if markers still touch
-            ax.set_xlim(-0.5 - pad, n_wines - 0.5 + pad)
+            pad = 0.05
+            ax.set_ylim(n_wines - 0.5 + pad, -0.5 - pad)  # first wine at top
 
         plt.tight_layout()
-        plt.savefig("corrections.pdf", format="pdf")
+        if savename is not None:
+            plt.savefig(
+                savename + "_corrections.pdf", format="pdf", bbox_inches="tight"
+            )
         plt.show()
 
-    viz_corrections(corrections, sigmas, blend_to_makeup_string)
+    viz_corrections(corrections, sigmas, blend_to_makeup_string, savename="red")
     return (viz_corrections,)
-
-
-@app.cell
-def _(plt, sns, wine_to_color):
-    def viz_corrections_h(corrections, sigmas, blend_to_makeup_string):
-        constituents = corrections["constituent"].unique()
-        palette = {i + 1: wine_to_color[i] for i in range(4)}
-        fig, axes = plt.subplots(
-            1, len(constituents), figsize=(3.4 * len(constituents), 4),
-            sharey=True,
-        )
-        for i, (ax, c) in enumerate(zip(axes, constituents)):
-            g = corrections[corrections["constituent"] == c]
-            ax.axvspan(-sigmas[c], sigmas[c], color="gray", alpha=0.15, lw=0, zorder=0)
-            ax.axvline(0, color="gray", lw=0.8, zorder=0)
-            sns.stripplot(
-                data=g, x="Δ", y="wine", hue="blend", ax=ax, dodge=True,
-                palette=palette, s=10, marker="X",
-            )
-            handles, labels = ax.get_legend_handles_labels()
-            ax.get_legend().remove()
-            if i == len(axes) - 1:
-                labels = [blend_to_makeup_string[int(l) - 1] for l in labels]
-                ax.legend(handles, labels, title="blend", fontsize=10,
-                          title_fontsize=12, loc="upper left",
-                          bbox_to_anchor=(1.02, 1))
-            ax.set_xlabel("Δ " + c)
-            ax.set_ylabel("")
-            ax.minorticks_off()
-        plt.tight_layout()
-        return fig
-
-    return (viz_corrections_h,)
-
-
-@app.cell
-def _(blend_to_makeup_string, corrections, sigmas, viz_corrections_h):
-    viz_corrections_h(corrections, sigmas, blend_to_makeup_string)
-    return
-
-
-@app.cell
-def _(blend_to_makeup_string, corrections, plt, sigmas, sns):
-    def viz_corrections_heatmap(corrections, sigmas, blend_to_makeup_string):
-        constituents = corrections["constituent"].unique()
-        wines = corrections["wine"].unique()
-        fig, axes = plt.subplots(
-            1, len(constituents), figsize=(3 * len(constituents), 3.8),
-            sharey=True, constrained_layout=True,
-        )
-        for i, (ax, c) in enumerate(zip(axes, constituents)):
-            g = corrections[corrections["constituent"] == c]
-            m = g.pivot_table(index="wine", columns="blend", values="Δ").reindex(wines) / sigmas[c]
-            sns.heatmap(
-                m, ax=ax, cmap="RdBu_r", center=0, vmin=-3, vmax=3,
-                annot=True, fmt=".1f", cbar=(i == len(axes) - 1),
-                cbar_kws={"label": "Δ / σ"},
-            )
-            ax.set_title(c)
-            ax.set_xlabel("")
-            ax.set_ylabel("")
-            ax.set_xticklabels(
-                [blend_to_makeup_string[int(t.get_text()) - 1] for t in ax.get_xticklabels()],
-                rotation=90,
-            )
-        return fig
-
-    viz_corrections_heatmap(corrections, sigmas, blend_to_makeup_string)
-    return
 
 
 @app.cell(hide_code=True)
@@ -2080,7 +2019,9 @@ def _(
     wsigmas,
 ):
     wcorrections = analyze_corrections(wpv_fprints, wblend_fprints, wsigmas)
-    viz_corrections(wcorrections, wsigmas, wblend_to_makeup_string)
+    viz_corrections(
+        wcorrections, wsigmas, wblend_to_makeup_string, savename="white"
+    )
     return
 
 
