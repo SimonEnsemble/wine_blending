@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.25.1"
+__generated_with = "0.17.6"
 app = marimo.App()
 
 
@@ -81,7 +81,7 @@ def _(colors):
         1: colors[2],
         2: colors[3],
         3: colors[4],
-    
+
         # white blends
         4: colors[5],
         5: colors[6],
@@ -198,7 +198,6 @@ def _(np):
             np.linalg.norm(x_a) * np.linalg.norm(x_b)
         )
         return np.acos(cos_theta) * 180 / np.pi
-
     return (fingerprint_angles,)
 
 
@@ -299,13 +298,13 @@ def _(
         'acid [g/L]': 6.1
     }
 
-    def viz_features(
+    def viz_fingerprints(
         pv_fprints, blend_fprints, constituent_to_xmax=constituent_to_xmax,
         savename=None, blend_to_makeup_string=blend_to_makeup_string
     ):
         wines = pv_fprints.index
         n_wines = len(wines)
-    
+
         constituents = pv_fprints.columns
         if incl_blends_checkbox.value:
             n_blends = blend_fprints.shape[0]
@@ -404,11 +403,11 @@ def _(
             plt.savefig(savename + ".pdf", format="pdf")
         return fig
 
-    viz_features(
+    viz_fingerprints(
         pv_fprints, blend_fprints, constituent_to_xmax=constituent_to_xmax,
-        savename="red_features"
+        savename="red_fingerprints"
     )
-    return (viz_features,)
+    return (viz_fingerprints,)
 
 
 @app.cell(hide_code=True)
@@ -467,7 +466,6 @@ def _(plt, wine_to_color):
         if savename:
             plt.savefig(blend_text + ".pdf", format="pdf", bbox_inches="tight")
         plt.show()
-
     return (viz_makeup_pie,)
 
 
@@ -498,7 +496,6 @@ def _(dataclass, pd):
             c1 = self.pv_fprints.columns
             c2 = self.blend_fprint.index
             assert all(c1 == c2)
-
     return (WineBlendingProb,)
 
 
@@ -548,7 +545,6 @@ def _(np):
         assert W.shape == (M, M)
 
         return W, A, b
-
     return (build_linear_system,)
 
 
@@ -573,7 +569,6 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
-
     return (assert_feasible_vol_fracs,)
 
 
@@ -617,7 +612,7 @@ def _(
                 x = np.linalg.lstsq(A, b)[0]
                 x = x / np.sum(x)
                 return x
-            
+
 
         if run_checks:
             # ☑️ [A b] full rank
@@ -794,7 +789,6 @@ def _(
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
-
     return (constrained_tls_soln,)
 
 
@@ -929,7 +923,6 @@ def _(WineBlendingProb, np):
             blend_fprint,
             blending_prob.sigmas
         )
-
     return (sample_perturbed_problem,)
 
 
@@ -971,7 +964,6 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
-
     return (sample_perturbed_solutions,)
 
 
@@ -1128,7 +1120,7 @@ def _(
                 # cmap = mcolors.LinearSegmentedColormap.from_list(
                 #     "", ["white", wine_to_color[blend_id]], N=N_levels+2,
                 # )
-        
+
                 levels = [get_level(density, l) for l in 
                           [0.60, 0.70, 0.80, 0.90]
                 ]
@@ -1290,7 +1282,7 @@ def _(
                         [
                             {
                                 'wine': wine,
-                                'blend': blend_id + 1,
+                                'blend': blend_id,
                                 'constituent': constituent,
                                 'Δ': delta_Ab[c, w]
                             }
@@ -1334,7 +1326,8 @@ def _(corrections):
 @app.cell
 def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
     def viz_corrections(
-        corrections, sigmas, blend_to_makeup_string, savename=None
+        corrections, sigmas, blend_to_makeup_string, 
+        savename=None, white=False
     ):
         groups = corrections.groupby("constituent")
         constituents = corrections["constituent"].unique()
@@ -1345,18 +1338,22 @@ def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
         )
         axes = axes[0]
 
-        palette = {i + 1: wine_to_color[i] for i in range(4)}
+        if not white:
+            palette = {i: wine_to_color[i] for i in range(4)}
+        else:
+            palette = {i: wine_to_color[i+4] for i in range(4)}
         for i, (ax, constituent) in enumerate(zip(axes, constituents)):
             group = groups.get_group(constituent)
             sns.stripplot(
                 data=group, x="Δ", y="wine", hue="blend", ax=ax, dodge=True,
-                palette=palette, s=10, marker="X"
+                palette=palette, s=10, marker="X", 
+                hue_order=[0, 1, 2, 3]
             )
 
             if i == n - 1:
                 # relabel seaborn's legend entries with the blend makeup strings
                 handles, labels = ax.get_legend_handles_labels()
-                labels = [blend_to_makeup_string[int(l) - 1] for l in labels]
+                labels = [blend_to_makeup_string[int(l)] for l in labels]
                 ax.legend(
                     handles, labels, title="blend",
                     loc="upper left", bbox_to_anchor=(1.02, 1),
@@ -1411,7 +1408,6 @@ def _(pv):
                 tip_resolution=50
         )
         pl.add_mesh(arrow, color=color)
-
     return (draw_vector,)
 
 
@@ -1466,7 +1462,6 @@ def _(
         )
 
         pl.show()
-
     return (viz_setup,)
 
 
@@ -1886,15 +1881,15 @@ def _(WineBlendingProb, wblend_fprints, wpv_fprints, wsigmas):
 
 @app.cell
 def _(
-    viz_features,
+    viz_fingerprints,
     wblend_fprints,
     wblend_to_makeup_string,
     wconstituent_to_xmax,
     wpv_fprints,
 ):
-    viz_features(
+    viz_fingerprints(
         wpv_fprints, wblend_fprints, constituent_to_xmax=wconstituent_to_xmax,
-        blend_to_makeup_string=wblend_to_makeup_string, savename="white_features"
+        blend_to_makeup_string=wblend_to_makeup_string, savename="white_fingerprints"
     )
     return
 
@@ -1951,7 +1946,7 @@ def _(
         ms = 10
         for b in range(4):
             color = wine_to_color[b+4]
-        
+
             # distribution of predicted make-ups
             vs = [x[0] for x in wwbp_solns[b]]
             print(f"blend {b} {np.mean(vs)*100:.1f}+/-{np.std(vs)*100:.1f}%")
@@ -1962,7 +1957,7 @@ def _(
                 color=color, marker='^',
                 clip_on=False, s=ms**2
             )
-        
+
             # predicted
             plt.scatter(
                 np.mean(vs), 1.0,
@@ -1970,7 +1965,7 @@ def _(
                 s=ms**2,
                 clip_on=False, transform=ax.get_xaxis_transform()
             )
-        
+
             sns.kdeplot(
                 vs, ax=ax, clip=(0, 1), fill=True, alpha=0.4, 
                 label=wblend_to_makeup_string[b],
@@ -2039,7 +2034,7 @@ def _(
 ):
     wcorrections = analyze_corrections(wpv_fprints, wblend_fprints, wsigmas)
     viz_corrections(
-        wcorrections, wsigmas, wblend_to_makeup_string, savename="white"
+        wcorrections, wsigmas, wblend_to_makeup_string, savename="white", white=True
     )
     return
 
@@ -2049,12 +2044,6 @@ def _(mo):
     mo.md(r"""
     ### compare with naive
     """)
-    return
-
-
-@app.cell
-def _(makeup):
-    makeup
     return
 
 
@@ -2076,7 +2065,7 @@ def _(
             )[0]
             for wblending_prob in wblending_probs
         ]
-    
+
         wx_olss = [
             constrained_tls_soln(
                 wblending_prob, verbose=True, run_checks=True, use_naive_method=True
@@ -2085,7 +2074,7 @@ def _(
         ]
 
         wines = wblending_probs[0].pv_fprints.index
-    
+
         fig, ax = plt.subplots(figsize=(6, 4))
 
         ax.set_xlim(0, 1)
@@ -2107,7 +2096,7 @@ def _(
         top.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
         ax.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
         right.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
-    
+
         ax.set_aspect('equal', 'box')
 
         true_makeup = np.array([wwb_true_makeup[b][wines[0]] for b in range(4)])
