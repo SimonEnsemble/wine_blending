@@ -2105,6 +2105,8 @@ def _(
 
         ax.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
         top.xaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+        right.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
     
         ax.set_aspect('equal', 'box')
 
