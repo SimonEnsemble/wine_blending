@@ -281,7 +281,7 @@ def _(mo):
 
 
 @app.cell
-def _(blend_fprints, constituent_to_xmax, plt, sigmas, sns):
+def _(blend_fprints, constituent_to_xmax, plt, pv_fprints, sigmas, sns):
     def viz_cute_fingerprint(
         fprints, wine, sigmas, constituent_to_xmax=constituent_to_xmax, 
         savename=None, incl_title=False
@@ -290,8 +290,9 @@ def _(blend_fprints, constituent_to_xmax, plt, sigmas, sns):
         constituents = fp.index
         colors = dict(zip(constituents, sns.color_palette("Pastel1")))
 
+        w = 0.55 if wine in ["Cab. Sauv.", "Merlot", "Cab. Franc"] else 0.65
         fig, axs = plt.subplots(
-            1, len(fp), figsize=(0.55 * len(fp), 2), layout="constrained"
+            1, len(fp), figsize=(w * len(fp), 2), layout="constrained"
         )
         for ax, constituent in zip(axs, constituents):
             ax.bar(
@@ -313,16 +314,11 @@ def _(blend_fprints, constituent_to_xmax, plt, sigmas, sns):
             )
         return fig
 
-    viz_cute_fingerprint(blend_fprints, 0, sigmas, savename="red_blend_0")
-    return (viz_cute_fingerprint,)
-
-
-@app.cell
-def _(pv_fprints, sigmas, viz_cute_fingerprint):
     # for schematic
     for _wine in pv_fprints.index:
         viz_cute_fingerprint(pv_fprints, _wine, sigmas, savename=_wine)
-    return
+    viz_cute_fingerprint(blend_fprints, 0, sigmas, savename="red_blend_0")
+    return (viz_cute_fingerprint,)
 
 
 @app.cell
@@ -2028,8 +2024,23 @@ def _(
 
 
 @app.cell
-def _(viz_cute_fingerprint, wconstituent_to_xmax, wpv_fprints):
-    viz_cute_fingerprint(wpv_fprints, "Sauv. Blanc", wconstituent_to_xmax)
+def _(
+    viz_cute_fingerprint,
+    wblend_fprints,
+    wconstituent_to_xmax,
+    wpv_fprints,
+    wsigmas,
+):
+    for _wine in wpv_fprints.index:
+        viz_cute_fingerprint(
+            wpv_fprints, _wine, wsigmas, 
+            constituent_to_xmax=wconstituent_to_xmax, savename=_wine
+        )
+    
+    viz_cute_fingerprint(
+        wblend_fprints, 0, wsigmas, 
+        constituent_to_xmax=wconstituent_to_xmax, savename="white_blend_0"
+    )
     return
 
 
