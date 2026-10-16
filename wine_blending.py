@@ -12,6 +12,7 @@ def _():
     import numpy as np
     from matplotlib.ticker import MultipleLocator, AutoMinorLocator, PercentFormatter, MaxNLocator
     import matplotlib.colors as mcolors
+    from scipy.optimize import nnls
     import pandas as pd
     from mpltern.datasets import get_triangular_grid
     # import pyvista as pv
@@ -48,6 +49,7 @@ def _():
         get_triangular_grid,
         mo,
         mpl,
+        nnls,
         np,
         pd,
         plt,
@@ -577,6 +579,31 @@ def _(np):
 
 
 @app.cell
+def _(build_linear_system, nnls, np):
+    def constrained_ols_soln(blending_prob, sum_to_one=True, w=1e3, verbose=False):
+        W, A, b = build_linear_system(blending_prob)
+        n = len(b)
+
+        A = W @ A
+        b = W @ b
+
+        if sum_to_one:
+            A = np.vstack([A, w * np.ones(A.shape[1])])
+            b = np.append(b, w)
+
+        x, _ = nnls(A, b)
+        print("sum: ", np.sum(x))
+        x = x / np.sum(x)
+
+        # residual in units of σ: (measured blend - predicted blend) / σ
+        r = (b[:n] - A[:n] @ x)
+    
+        return x, r
+
+    return (constrained_ols_soln,)
+
+
+@app.cell
 def _(
     WineBlendingProb,
     assert_feasible_vol_fracs,
@@ -586,10 +613,8 @@ def _(
 ):
     def constrained_tls_soln(
         blending_prob, 
-        verbose=False, run_checks=False, use_naive_method=False,
-        handle_non_negativity=True
+        verbose=False, run_checks=False, handle_non_negativity=True
     ):
-        # W pulled from outside.
         W, A, b = build_linear_system(blending_prob)
 
         # build augmented matrix [A; b]
@@ -601,22 +626,6 @@ def _(
         # case M+1 > N
         M = blending_prob.pv_fprints.shape[1] # constituents
         N = blending_prob.pv_fprints.shape[0] # parent mixtures
-
-        if use_naive_method:
-            delta_Ab = np.zeros((M, N+1))
-            if M == N:
-                x = np.linalg.solve(A, b)
-                if run_checks:
-                    print("sum xi naive: ", np.sum(x))
-                    assert not np.isclose(np.sum(x), 1.0, atol=0.005)
-                x = x / np.sum(x)
-
-                return x, delta_Ab
-            else:
-                x = np.linalg.lstsq(A, b)[0]
-                x = x / np.sum(x)
-                return x, delta_Ab
-
 
         if run_checks:
             # ☑️ [A b] full rank
@@ -803,7 +812,7 @@ def _(blending_prob, constrained_tls_soln):
         blending_prob, verbose=True, run_checks=True
     )
     x_tls, delta_Ab
-    return delta_Ab, x_tls
+    return (delta_Ab,)
 
 
 @app.cell(hide_code=True)
@@ -838,23 +847,14 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 🙄 compare TLS with naive approaches
+    ### compare TLS with OLS approaches
     """)
     return
 
 
 @app.cell
-def _(blending_prob, constrained_tls_soln):
-    x_naive, _ = constrained_tls_soln(
-        blending_prob, 
-        run_checks=True, use_naive_method=True
-    )
-    return (x_naive,)
-
-
-@app.cell
-def _(np, x_naive, x_tls):
-    x_tls - np.ravel(x_naive)
+def _(blending_prob, constrained_ols_soln):
+    constrained_ols_soln(blending_prob)
     return
 
 
@@ -955,7 +955,7 @@ def _(blending_prob, np, sample_perturbed_problem):
 def _(constrained_tls_soln, sample_perturbed_problem):
     def sample_perturbed_solutions(
         blending_prob,
-        n_samples=100, use_naive_method=False
+        n_samples=100
     ):
         x_tlss = []
 
@@ -963,8 +963,7 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             perturbed_prob = sample_perturbed_problem(blending_prob)
 
             x_tls, _ = constrained_tls_soln(
-                perturbed_prob,
-                use_naive_method=use_naive_method
+                perturbed_prob
             )
 
             x_tlss.append(x_tls)
@@ -1108,8 +1107,7 @@ def _(
             ###
             x_tlss = sample_perturbed_solutions(
                 blending_prob, 
-                n_samples=nb_samples if checkbox_kde.value else 100,
-                use_naive_method=False
+                n_samples=nb_samples if checkbox_kde.value else 100
             )
             alpha = 10.0
             lower = np.round(
@@ -2148,7 +2146,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### compare with naive
+    ### compare with OLS
     """)
     return
 
@@ -2156,6 +2154,7 @@ def _(mo):
 @app.cell
 def _(
     PercentFormatter,
+    constrained_ols_soln,
     constrained_tls_soln,
     np,
     plt,
@@ -2166,16 +2165,12 @@ def _(
         wblending_probs, wwb_true_makeup
     ):
         wx_tlss = [
-            constrained_tls_soln(
-                wblending_prob, verbose=True, run_checks=True
-            )[0]
+            constrained_tls_soln(wblending_prob, verbose=True, run_checks=True)[0]
             for wblending_prob in wblending_probs
         ]
 
         wx_olss = [
-            constrained_tls_soln(
-                wblending_prob, verbose=True, run_checks=True, use_naive_method=True
-            )
+            constrained_ols_soln(wblending_prob)[0]
             for wblending_prob in wblending_probs
         ]
 
@@ -2207,7 +2202,7 @@ def _(
 
         true_makeup = np.array([wwb_true_makeup[b][wines[0]] for b in range(4)])
         tls_makeup = np.array([wx_tls[0] for wx_tls in wx_tlss])
-        ols_makeup = np.ravel(np.array([wx_ols[0][0] for wx_ols in wx_olss]))
+        ols_makeup = np.ravel(np.array([wx_ols[0] for wx_ols in wx_olss]))
 
         tls_err = np.sqrt(np.mean((true_makeup - tls_makeup)**2))
         ols_err = np.sqrt(np.mean((true_makeup - ols_makeup)**2))
@@ -2226,6 +2221,71 @@ def _(
         plt.show()
 
     compare_with_ols(wblending_probs, wwb_true_makeup)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## ethanol noise
+    """)
+    return
+
+
+@app.cell
+def _(np, pd):
+    etoh_raw_data = np.array([
+        [14.63, 14.63, 14.61],  # 12% target
+        [15.79, 15.75, 15.72],
+        [16.81, 16.77, 16.75],
+        [17.87, 17.87, 17.85],  # 15% target
+    ])
+
+    etoh_data = pd.DataFrame({
+        "experiment": np.repeat(range(4), etoh_raw_data.shape[1]),
+        "EtOH [vol. %]": etoh_raw_data.ravel(),
+    })
+    etoh_data["mean EtOH [vol. %]"] = etoh_data.groupby("experiment")["EtOH [vol. %]"].transform("mean")
+    etoh_data["std EtOH [vol. %]"] = etoh_data.groupby("experiment")["EtOH [vol. %]"].transform("std")
+    etoh_data
+    return (etoh_data,)
+
+
+@app.cell
+def _(etoh_data, plt, sns):
+    def viz_etoh_data(etoh_data):
+        fig, ax = plt.subplots(figsize=(5, 4))
+        sns.swarmplot(
+            data=etoh_data, x="mean EtOH [vol. %]", y="EtOH [vol. %]",
+            native_scale=True, size=7, ax=ax,
+        )
+        ax.set_xticks(etoh_data["mean EtOH [vol. %]"].unique())
+        ax.set_xticklabels([f"{m:.2f}" for m in etoh_data["mean EtOH [vol. %]"].unique()])
+        plt.show()
+    
+    viz_etoh_data(etoh_data)
+    return
+
+
+@app.cell
+def _(etoh_data, plt):
+    def viz_etoh_std(etoh_data):
+        means = etoh_data["mean EtOH [vol. %]"]
+        stds = etoh_data["std EtOH [vol. %]"]
+    
+        fig, ax = plt.subplots(figsize=(5, 4))
+        ax.plot(means, stds, "o-")
+        ax.set_xlabel("mean measured EtOH [vol. %]")
+        ax.set_ylabel("std measured EtOH [vol. %]")
+        ax.set_ylim(ymin=0)
+        plt.show()
+    
+    viz_etoh_std(etoh_data)
+    return
+
+
+@app.cell
+def _():
     return
 
 
