@@ -281,6 +281,54 @@ def _(mo):
 
 
 @app.cell
+def _(blend_fprints, constituent_to_xmax, plt, sns):
+    def viz_cute_fingerprint(
+        fprints, wine, constituent_to_xmax=constituent_to_xmax, 
+        savename=None, incl_title=False
+    ):
+        fp = fprints.loc[wine, :]
+        constituents = fp.index
+        colors = dict(zip(constituents, sns.color_palette("Pastel1")))
+
+        fig, axs = plt.subplots(
+            1, len(fp), figsize=(0.55 * len(fp), 2), layout="constrained"
+        )
+        for ax, constituent in zip(axs, constituents):
+            ax.bar(0, fp[constituent], width=0.6, color=colors[constituent])
+            ax.set_ylim(0, constituent_to_xmax[constituent])
+            ax.set_xticks([])
+            clabel = constituent.replace(" ", "\n", 1)
+            ax.set_title(clabel, fontsize=10)
+            ax.spines[["top", "right"]].set_visible(False)
+            ax.tick_params(labelsize=7)
+        if incl_title:
+            fig.suptitle(wine, fontsize=10)
+
+        if savename is not None:
+            fig.savefig(
+                savename + "_fingerprint.pdf", format="pdf", bbox_inches="tight"
+            )
+        return fig
+
+    viz_cute_fingerprint(blend_fprints, 0, savename="red_blend_0")
+    return (viz_cute_fingerprint,)
+
+
+@app.cell
+def _(pv_fprints, viz_cute_fingerprint):
+    # for schematic
+    for _wine in pv_fprints.index:
+        viz_cute_fingerprint(pv_fprints, _wine, savename=_wine)
+    return
+
+
+@app.cell
+def _(pv_fprints):
+    pv_fprints
+    return
+
+
+@app.cell
 def _(
     MaxNLocator,
     blend_fprints,
@@ -290,7 +338,7 @@ def _(
     pv_fprints,
     wine_to_color,
 ):
-    def _draw_lollipop(ax, pos, val, color):
+    def draw_lollipop(ax, pos, val, color):
         ax.plot([0, val], [pos, pos], color=color, zorder=100)
         ax.scatter([val], [pos], color=color, zorder=100, s=8**2, clip_on=False)
 
@@ -334,7 +382,7 @@ def _(
             axs[c].xaxis.set_major_locator(MaxNLocator(nbins=4))
             for w, wine in enumerate(wines):
                 conc = pv_fprints.loc[wine, constituent]
-                _draw_lollipop(axs[c], w, conc, wine_to_color[wine])
+                draw_lollipop(axs[c], w, conc, wine_to_color[wine])
 
             yticks = list(range(n_wines))
             yticklabels = list(wines)
@@ -348,7 +396,7 @@ def _(
                     else:
                         color = wine_to_color[blend_id]
                     conc = blend_fprints.iloc[blend_id][constituent]
-                    _draw_lollipop(
+                    draw_lollipop(
                         axs[c],
                         n_wines + blend_id + d, conc,
                         color
@@ -409,7 +457,7 @@ def _(
         pv_fprints, blend_fprints, constituent_to_xmax=constituent_to_xmax,
         savename="red_fingerprints"
     )
-    return (viz_fingerprints,)
+    return constituent_to_xmax, viz_fingerprints
 
 
 @app.cell(hide_code=True)
@@ -597,7 +645,7 @@ def _(build_linear_system, nnls, np):
 
         # residual in units of σ: (measured blend - predicted blend) / σ
         r = (b[:n] - A[:n] @ x)
-    
+
         return x, r
 
     return (constrained_ols_soln,)
@@ -1977,6 +2025,12 @@ def _(
 
 
 @app.cell
+def _(viz_cute_fingerprint, wconstituent_to_xmax, wpv_fprints):
+    viz_cute_fingerprint(wpv_fprints, "Sauv. Blanc", wconstituent_to_xmax)
+    return
+
+
+@app.cell
 def _(WineBlendingProb, wblend_fprints, wpv_fprints, wsigmas):
     wblending_probs = [
         WineBlendingProb(wpv_fprints, wblend_fprints.loc[b, :], wsigmas)
@@ -2262,7 +2316,7 @@ def _(etoh_data, plt, sns):
         ax.set_xticks(etoh_data["mean EtOH [vol. %]"].unique())
         ax.set_xticklabels([f"{m:.2f}" for m in etoh_data["mean EtOH [vol. %]"].unique()])
         plt.show()
-    
+
     viz_etoh_data(etoh_data)
     return
 
@@ -2272,14 +2326,14 @@ def _(etoh_data, plt):
     def viz_etoh_std(etoh_data):
         means = etoh_data["mean EtOH [vol. %]"]
         stds = etoh_data["std EtOH [vol. %]"]
-    
+
         fig, ax = plt.subplots(figsize=(5, 4))
         ax.plot(means, stds, "o-")
         ax.set_xlabel("mean measured EtOH [vol. %]")
         ax.set_ylabel("std measured EtOH [vol. %]")
         ax.set_ylim(ymin=0)
         plt.show()
-    
+
     viz_etoh_std(etoh_data)
     return
 
