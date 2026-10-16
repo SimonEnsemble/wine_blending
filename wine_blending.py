@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.17.6"
+__generated_with = "0.25.1"
 app = marimo.App()
 
 
@@ -197,6 +197,7 @@ def _(np):
             np.linalg.norm(x_a) * np.linalg.norm(x_b)
         )
         return np.acos(cos_theta) * 180 / np.pi
+
     return (fingerprint_angles,)
 
 
@@ -465,6 +466,7 @@ def _(plt, wine_to_color):
         if savename:
             plt.savefig(blend_text + ".pdf", format="pdf", bbox_inches="tight")
         plt.show()
+
     return (viz_makeup_pie,)
 
 
@@ -495,6 +497,7 @@ def _(dataclass, pd):
             c1 = self.pv_fprints.columns
             c2 = self.blend_fprint.index
             assert all(c1 == c2)
+
     return (WineBlendingProb,)
 
 
@@ -544,6 +547,7 @@ def _(np):
         assert W.shape == (M, M)
 
         return W, A, b
+
     return (build_linear_system,)
 
 
@@ -568,6 +572,7 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
+
     return (assert_feasible_vol_fracs,)
 
 
@@ -788,6 +793,7 @@ def _(
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
+
     return (constrained_tls_soln,)
 
 
@@ -922,6 +928,7 @@ def _(WineBlendingProb, np):
             blend_fprint,
             blending_prob.sigmas
         )
+
     return (sample_perturbed_problem,)
 
 
@@ -963,6 +970,7 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
+
     return (sample_perturbed_solutions,)
 
 
@@ -1386,7 +1394,7 @@ def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
         plt.show()
 
     viz_corrections(corrections, sigmas, blend_to_makeup_string, savename="red")
-    return (viz_corrections,)
+    return
 
 
 @app.cell
@@ -1402,8 +1410,8 @@ def _(
     sigmas,
     sns,
 ):
-    def _correction_heatmaps(
-        blending_probs, blend_to_makeup_string, savename=None
+    def viz_correction_heatmaps(
+        blending_probs, blend_to_makeup_string, savename=None, ncols=2
     ):
         wines = list(blending_probs[0].pv_fprints.index)
         constituents = list(blending_probs[0].pv_fprints.columns)
@@ -1412,7 +1420,7 @@ def _(
         for prob in blending_probs:
             assert list(prob.pv_fprints.index) == wines
             assert list(prob.pv_fprints.columns) == constituents
-        
+
             x, delta_Ab = constrained_tls_soln(prob)
 
             s = np.array([prob.sigmas[c] for c in constituents])
@@ -1430,28 +1438,41 @@ def _(
         lim = max(np.nanmax(np.abs(t.values)) for t in tables)
         n = len(tables)
         n_rows, n_cols = tables[0].shape
+        nrows = int(np.ceil(n / ncols))
 
         fig, axs = plt.subplots(
-            1, n, sharey=True, layout="constrained",
-            figsize=(0.9 * n_cols * n + 1.5, 0.45 * n_rows + 1.8),
+            nrows, ncols, sharex=True, sharey=True, layout="constrained",
+            figsize=(0.9 * n_cols * ncols + 1.5, (0.45 * n_rows + 1.0) * nrows + 1.2),
+            squeeze=False,
         )
-        for b, (ax, t) in enumerate(zip(axs, tables)):
+        axs_flat = axs.ravel()
+        used_axs = axs_flat[:n]
+
+        for b, (ax, t) in enumerate(zip(used_axs, tables)):
             sns.heatmap(
-                t, ax=ax, cmap="RdBu_r", center=0, vmin=-lim, vmax=lim,
-                annot=True, fmt=".1f", cbar=False, 
+                t, ax=ax, cmap="bwr", center=0, vmin=-lim, vmax=lim,
+                annot=True, fmt=".1f", cbar=False,
                 linewidths=0.5, linecolor="white",
             )
-            ax.set_facecolor("0.85") # NaN (removed wine) cells show as gray
-            ax.set_title(blend_to_makeup_string[b].strip(), fontsize=10)
+            ax.set_facecolor("0.85")  # NaN (removed wine) cells show as gray
+            ax.set_title("blend:\n" + blend_to_makeup_string[b].strip(), fontsize=10)
             ax.tick_params(axis="x", rotation=45, length=0)
             ax.tick_params(axis="y", rotation=0, length=0)
             ax.minorticks_off()
             for lbl in ax.get_xticklabels():
                 lbl.set_ha("right")
 
+        # hide any unused panels (e.g. 3 blends in a 2x2 grid)
+        for ax in axs_flat[n:]:
+            ax.set_visible(False)
+
+        # tick labels only on the bottom row / left column
+        for ax in used_axs:
+            ax.label_outer()
+
         fig.colorbar(
-            axs[0].collections[0], ax=axs, shrink=0.8,
-            label="correction, $\Delta / \sigma$",
+            used_axs[0].collections[0], ax=list(used_axs), shrink=0.8,
+            label=r"TLS correction, $\Delta / \sigma$",
         )
         if savename is not None:
             plt.savefig(savename + "_corrections_heatmap.pdf", bbox_inches="tight")
@@ -1462,8 +1483,8 @@ def _(
         WineBlendingProb(pv_fprints, blend_fprints.loc[_b], sigmas)
         for _b in range(blend_fprints.shape[0])
     ]
-    _correction_heatmaps(_red_probs, blend_to_makeup_string, savename="red")
-    return
+    viz_correction_heatmaps(_red_probs, blend_to_makeup_string, savename="red")
+    return (viz_correction_heatmaps,)
 
 
 @app.cell(hide_code=True)
@@ -1485,6 +1506,7 @@ def _(pv):
                 tip_resolution=50
         )
         pl.add_mesh(arrow, color=color)
+
     return (draw_vector,)
 
 
@@ -1539,6 +1561,7 @@ def _(
         )
 
         pl.show()
+
     return (viz_setup,)
 
 
@@ -1832,7 +1855,13 @@ def _(mo):
 
 
 @app.cell
-def _(pd):
+def _():
+    spec_cols = ["abs. [280 nm]", "abs. [320 nm]"]
+    return (spec_cols,)
+
+
+@app.cell
+def _(pd, spec_cols):
     def read_uv_viz_data(sheet_name="Table"):
         path = "data/whitewineblendtrial.xlsx"
         # Find the header row (first column == "#") to skip the instrument metadata
@@ -1852,6 +1881,11 @@ def _(pd):
         out = df.set_index("Name")[abs_cols]
         out.columns = [f"abs. [{w} nm]" for w in wavelengths]
 
+        print("remove outlier B2 1")
+        out = out[out.index != "B2 1"]
+
+        out = out[spec_cols]
+
         return out
 
     raw_spec_data = read_uv_viz_data()
@@ -1861,9 +1895,9 @@ def _(pd):
 
 
 @app.cell
-def _(group, raw_spec_data):
+def _(group, raw_spec_data, spec_cols):
     spec_data = raw_spec_data.groupby(group).mean()
-    spec_data = spec_data[["abs. [280 nm]", "abs. [320 nm]"]]
+    spec_data = spec_data[spec_cols]
     spec_data = spec_data.rename(index={"BB": "Bordeaux Blanc", "SB": "Sauv. Blanc"})
     spec_data.index.name = "Name"
     spec_data
@@ -1881,17 +1915,14 @@ def _(spec_data):
 def _(group, raw_spec_data):
     spec_data_sigma_data = raw_spec_data.groupby(group).std()
 
-    # sigma_spec = spec_data_sigma_data.std().to_dict() # sensitive to outlier
-    dev = raw_spec_data - raw_spec_data.groupby(group).transform("median")
-    sigma_spec = (1.4826 * dev.abs().median()).to_dict()
-
-    spec_data_sigma_data
-    return (sigma_spec,)
+    sigma_spec = spec_data_sigma_data.mean().to_dict()
+    sigma_spec
+    return sigma_spec, spec_data_sigma_data
 
 
 @app.cell
-def _(sigma_spec):
-    sigma_spec
+def _(spec_data_sigma_data):
+    spec_data_sigma_data#.mean()
     return
 
 
@@ -2102,16 +2133,15 @@ def _(
 @app.cell
 def _(
     analyze_corrections,
-    viz_corrections,
+    viz_correction_heatmaps,
     wblend_fprints,
     wblend_to_makeup_string,
+    wblending_probs,
     wpv_fprints,
     wsigmas,
 ):
     wcorrections = analyze_corrections(wpv_fprints, wblend_fprints, wsigmas)
-    viz_corrections(
-        wcorrections, wsigmas, wblend_to_makeup_string, savename="white", white=True
-    )
+    viz_correction_heatmaps(wblending_probs, wblend_to_makeup_string, savename="white")
     return
 
 
