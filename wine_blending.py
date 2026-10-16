@@ -18,7 +18,6 @@ def _():
     import seaborn as sns
     import statsmodels.api as sm
     import matplotlib as mpl
-    from dataclasses import dataclass
     import scipy
     import mpltern
     from dataclasses import dataclass
@@ -599,6 +598,7 @@ def _(
         N = blending_prob.pv_fprints.shape[0] # parent mixtures
 
         if use_naive_method:
+            delta_Ab = np.zeros((M, N+1))
             if M == N:
                 x = np.linalg.solve(A, b)
                 if run_checks:
@@ -606,12 +606,11 @@ def _(
                     assert not np.isclose(np.sum(x), 1.0, atol=0.005)
                 x = x / np.sum(x)
 
-                delta_Ab = np.zeros((M, N+1))
                 return x, delta_Ab
             else:
                 x = np.linalg.lstsq(A, b)[0]
                 x = x / np.sum(x)
-                return x
+                return x, delta_Ab
 
 
         if run_checks:
@@ -1187,9 +1186,9 @@ def _(
         if not checkbox_kde.value:
             ax.legend(
                 handles=[
-                    Line2D([0], [0], marker='o', color='black', label='true',
+                    Line2D([0], [0], marker='^', color='black', label='true',
                            markersize=markersize, linestyle='None'),
-                    Line2D([0], [0], marker='^', color='None', label='predicted',
+                    Line2D([0], [0], marker='o', color='None', label='predicted',
                            markersize=markersize, linestyle='None', markerfacecolor='black'),
                 ], 
                 fontsize=12
@@ -1331,6 +1330,7 @@ def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
     ):
         groups = corrections.groupby("constituent")
         constituents = corrections["constituent"].unique()
+        wines = corrections["wine"].unique()
         n = len(constituents)
 
         fig, axes = plt.subplots(
@@ -1347,7 +1347,7 @@ def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
             sns.stripplot(
                 data=group, x="Δ", y="wine", hue="blend", ax=ax, dodge=True,
                 palette=palette, s=10, marker="X", 
-                hue_order=[0, 1, 2, 3]
+                hue_order=[0, 1, 2, 3], order=list(wines)
             )
 
             if i == n - 1:
@@ -1371,7 +1371,7 @@ def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
             ax.axvline(-sigmas[constituent], color="gray", linestyle="--")
 
             # shade every other wine band (now horizontal)
-            for j in [1, 3]:
+            for j in range(1, len(wines), 2):
                 ax.axhspan(j - 0.5, j + 0.5, color="gray", alpha=0.12, zorder=0)
 
             n_wines = group["wine"].nunique()
@@ -1387,6 +1387,83 @@ def _(blend_to_makeup_string, corrections, plt, sigmas, sns, wine_to_color):
 
     viz_corrections(corrections, sigmas, blend_to_makeup_string, savename="red")
     return (viz_corrections,)
+
+
+@app.cell
+def _(
+    WineBlendingProb,
+    blend_fprints,
+    blend_to_makeup_string,
+    constrained_tls_soln,
+    np,
+    pd,
+    plt,
+    pv_fprints,
+    sigmas,
+    sns,
+):
+    def _correction_heatmaps(
+        blending_probs, blend_to_makeup_string, savename=None
+    ):
+        wines = list(blending_probs[0].pv_fprints.index)
+        constituents = list(blending_probs[0].pv_fprints.columns)
+        row_order = wines + ["blend"]
+        tables = []
+        for prob in blending_probs:
+            assert list(prob.pv_fprints.index) == wines
+            assert list(prob.pv_fprints.columns) == constituents
+        
+            x, delta_Ab = constrained_tls_soln(prob)
+
+            s = np.array([prob.sigmas[c] for c in constituents])
+
+            # corrected = measured - Δ, so (measured - corrected) / σ = Δ / σ
+            t = pd.DataFrame(
+                (delta_Ab / s[:, None]).T,
+                index=wines + ["blend"], columns=constituents
+            )
+            # wines removed by the non-negativity step have Δ = 0; show them as blank
+            t.iloc[np.flatnonzero(x == 0), :] = np.nan
+            t = t.reindex(index=row_order, columns=constituents)
+            tables.append(t)
+
+        lim = max(np.nanmax(np.abs(t.values)) for t in tables)
+        n = len(tables)
+        n_rows, n_cols = tables[0].shape
+
+        fig, axs = plt.subplots(
+            1, n, sharey=True, layout="constrained",
+            figsize=(0.9 * n_cols * n + 1.5, 0.45 * n_rows + 1.8),
+        )
+        for b, (ax, t) in enumerate(zip(axs, tables)):
+            sns.heatmap(
+                t, ax=ax, cmap="RdBu_r", center=0, vmin=-lim, vmax=lim,
+                annot=True, fmt=".1f", cbar=False, 
+                linewidths=0.5, linecolor="white",
+            )
+            ax.set_facecolor("0.85") # NaN (removed wine) cells show as gray
+            ax.set_title(blend_to_makeup_string[b].strip(), fontsize=10)
+            ax.tick_params(axis="x", rotation=45, length=0)
+            ax.tick_params(axis="y", rotation=0, length=0)
+            ax.minorticks_off()
+            for lbl in ax.get_xticklabels():
+                lbl.set_ha("right")
+
+        fig.colorbar(
+            axs[0].collections[0], ax=axs, shrink=0.8,
+            label="correction, $\Delta / \sigma$",
+        )
+        if savename is not None:
+            plt.savefig(savename + "_corrections_heatmap.pdf", bbox_inches="tight")
+        return fig
+
+
+    _red_probs = [
+        WineBlendingProb(pv_fprints, blend_fprints.loc[_b], sigmas)
+        for _b in range(blend_fprints.shape[0])
+    ]
+    _correction_heatmaps(_red_probs, blend_to_makeup_string, savename="red")
+    return
 
 
 @app.cell(hide_code=True)
@@ -1605,11 +1682,11 @@ def _():
         w_wa = V_wa * rho_wa
 
         rho_ideal = (V_et * rho_et + V_wa * rho_wa) / V
-        print("ideal density [g/L]: ", rho_ideal) 
+        print("ideal density [g/mL]: ", rho_ideal) 
 
-        x = w_et / (w_et + w_wa)
+        x = w_et / (w_et + w_wa) * 100
         m = (rho_2 - rho_1) / (x_2 - x_1)
-        print("actual density [g/L]:", rho_1 + m * (x - x_1))
+        print("actual density [g/mL]:", rho_1 + m * (x - x_1))
 
     excess_volume(12.9)
     return
@@ -1912,6 +1989,7 @@ def _(sample_perturbed_solutions, wblending_probs):
 def _(
     Line2D,
     PercentFormatter,
+    constrained_tls_soln,
     mpl,
     np,
     plt,
@@ -1959,8 +2037,11 @@ def _(
             )
 
             # predicted
+            x_tls, delta_Ab = constrained_tls_soln(
+                wblending_probs[b]
+            )
             plt.scatter(
-                np.mean(vs), 1.0,
+                x_tls[0], 1.0,
                 color=color, marker='*',
                 s=ms**2,
                 clip_on=False, transform=ax.get_xaxis_transform()
@@ -1971,11 +2052,6 @@ def _(
                 label=wblend_to_makeup_string[b],
                 color=color
             )
-
-        ax.legend(
-            title="blend", loc="center left", bbox_to_anchor=(1.02, 0.5), 
-            frameon=False, fontsize=10
-        )
 
         blend_handles = [
             mpl.patches.Patch(
@@ -2101,7 +2177,7 @@ def _(
 
         true_makeup = np.array([wwb_true_makeup[b][wines[0]] for b in range(4)])
         tls_makeup = np.array([wx_tls[0] for wx_tls in wx_tlss])
-        ols_makeup = np.ravel(np.array([wx_ols[0] for wx_ols in wx_olss]))
+        ols_makeup = np.ravel(np.array([wx_ols[0][0] for wx_ols in wx_olss]))
 
         tls_err = np.sqrt(np.mean((true_makeup - tls_makeup)**2))
         ols_err = np.sqrt(np.mean((true_makeup - ols_makeup)**2))
@@ -2120,11 +2196,6 @@ def _(
         plt.show()
 
     compare_with_ols(wblending_probs, wwb_true_makeup)
-    return
-
-
-@app.cell
-def _():
     return
 
 
