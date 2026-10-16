@@ -281,9 +281,9 @@ def _(mo):
 
 
 @app.cell
-def _(blend_fprints, constituent_to_xmax, plt, sns):
+def _(blend_fprints, constituent_to_xmax, plt, sigmas, sns):
     def viz_cute_fingerprint(
-        fprints, wine, constituent_to_xmax=constituent_to_xmax, 
+        fprints, wine, sigmas, constituent_to_xmax=constituent_to_xmax, 
         savename=None, incl_title=False
     ):
         fp = fprints.loc[wine, :]
@@ -294,7 +294,10 @@ def _(blend_fprints, constituent_to_xmax, plt, sns):
             1, len(fp), figsize=(0.55 * len(fp), 2), layout="constrained"
         )
         for ax, constituent in zip(axs, constituents):
-            ax.bar(0, fp[constituent], width=0.6, color=colors[constituent])
+            ax.bar(
+                0, fp[constituent], width=0.6, color=colors[constituent], 
+                  yerr=sigmas[constituent]
+            )
             ax.set_ylim(0, constituent_to_xmax[constituent])
             ax.set_xticks([])
             clabel = constituent.replace(" ", "\n", 1)
@@ -310,15 +313,15 @@ def _(blend_fprints, constituent_to_xmax, plt, sns):
             )
         return fig
 
-    viz_cute_fingerprint(blend_fprints, 0, savename="red_blend_0")
+    viz_cute_fingerprint(blend_fprints, 0, sigmas, savename="red_blend_0")
     return (viz_cute_fingerprint,)
 
 
 @app.cell
-def _(pv_fprints, viz_cute_fingerprint):
+def _(pv_fprints, sigmas, viz_cute_fingerprint):
     # for schematic
     for _wine in pv_fprints.index:
-        viz_cute_fingerprint(pv_fprints, _wine, savename=_wine)
+        viz_cute_fingerprint(pv_fprints, _wine, sigmas, savename=_wine)
     return
 
 
