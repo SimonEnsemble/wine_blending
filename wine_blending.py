@@ -103,7 +103,7 @@ def _(colors):
 
 @app.cell
 def _(sns):
-    wine_to_pie_color = {
+    vwine_to_pie_color = {
         # reds: three shades of red/purple
         **dict(zip(["Cab. Sauv.", "Merlot", "Cab. Franc"],
                    sns.color_palette("Reds_r", 4)[:3])),
@@ -111,7 +111,7 @@ def _(sns):
         **dict(zip(["Sauv. Blanc", "Bordeaux Blanc"],
                    sns.color_palette("YlOrBr", 4)[1:3])),
     }
-    return (wine_to_pie_color,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -1458,7 +1458,7 @@ def _(blending_probs, constrained_tls_soln, np, pd, plt, sns):
 
         fig, axs = plt.subplots(
             nrows, ncols, sharex=True, sharey=True, layout="constrained",
-            figsize=(0.9 * n_cols * ncols + 1.5, (0.45 * n_rows + 1.0) * nrows + 1.2),
+            figsize=(6, 6),
             squeeze=False,
         )
         axs_flat = axs.ravel()
