@@ -71,14 +71,20 @@ def _(sns):
 
 @app.cell
 def _(colors):
-    wine_to_color = {
-        # parent
-        "Cab. Sauv.": colors[9],
-        "Merlot": colors[9],
-        "Cab. Franc": colors[9],
+    list(colors[9])
+    return
 
-        "Sauv. Blanc": "gold",
-        "Bordeaux Blanc": "gold",
+
+@app.cell
+def _(colors):
+    wine_to_color = {
+        # parent (from KeyNote)
+        "Cab. Sauv.": [134/255, 40/255, 35/2555],# colors[9],
+        "Merlot": [153/255, 45/255, 61/2555],#colors[9],
+        "Cab. Franc": [175/255, 75/255, 92/2555],#colors[9],
+
+        "Sauv. Blanc": [232/255, 220/255, 136/2555],# "gold",
+        "Bordeaux Blanc": [200/255, 175/255, 73/2555],#"gold",
 
         # red blends
         0: colors[0],
@@ -343,15 +349,19 @@ def _(
         savename=None, incl_title=False
     ):
         fp = fprints.loc[wine, constituents]
-        colors = dict(zip(constituents, sns.color_palette("Pastel1")))
+        # colors = dict(zip(constituents, sns.color_palette("Pastel1")))
+        color = sns.color_palette("Pastel1")[2]
 
-        w = 0.55 if wine in ["Cab. Sauv.", "Merlot", "Cab. Franc"] else 0.65
+        if wine in ["Cab. Sauv.", "Merlot", "Cab. Franc"] or "red" in savename:
+            w = 0.55
+        else:
+            w = 0.65
         fig, axs = plt.subplots(
             1, len(fp), figsize=(w * len(fp), 2), layout="constrained"
         )
         for ax, constituent in zip(axs, constituents):
             ax.bar(
-                0, fp[constituent], width=0.6, color=colors[constituent], 
+                0, fp[constituent], width=0.6, color=color,#colors[constituent], 
                   yerr=sigmas[constituent]
             )
             ax.set_ylim(0, constituent_to_xmax[constituent])
@@ -1177,11 +1187,12 @@ def _(
 
         all_errors = [] # for error analysis
 
-        ax = plt.subplot(projection="ternary")
+        fig = plt.figure(figsize=(5, 5))
+        ax = fig.add_subplot(projection="ternary")
 
-        ax.set_tlabel(wines[0] + " [volume %]")
-        ax.set_llabel(wines[1] + " [volume %]")
-        ax.set_rlabel(wines[2] + " [volume %]")
+        ax.set_tlabel(wines[0] + " [vol. %]")
+        ax.set_llabel(wines[1] + " [vol. %]")
+        ax.set_rlabel(wines[2] + " [vol. %]")
 
         for _ax in [ax.taxis, ax.laxis, ax.raxis]:
             _ax.set_label_position("tick1")
@@ -1321,13 +1332,13 @@ def _(
 
             leg1 = ax.legend(
                 handles=blend_handles, loc='upper left',
-                bbox_to_anchor=(0.75, 1.0), borderaxespad=0, title='blend',
-                prop={'size': 10}, title_fontsize=12, fontsize=10
+                bbox_to_anchor=(0.7, 1.12), borderaxespad=0, title='blend',
+                prop={'size': 8}, title_fontsize=10, fontsize=6
             )
 
             leg2 = ax.legend(
                 handles=symbol_handles, loc='upper left',
-                bbox_to_anchor=(0.9, 0.75),
+                bbox_to_anchor=(0.875, 0.8),
                 borderaxespad=0, prop={'size': 10}
             )
 
@@ -1979,10 +1990,10 @@ def _(
 ):
     def viz_white_wine_unblending(wblending_probs):
         wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wblending_probs]
-    
+
         wines = wblending_probs[0].wines
 
-        fig, ax = plt.subplots(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=(5, 2.5))
 
         ax.set_xlim(0, 1)
         ax.set_xlabel(wines[0] + " [volume %]")
