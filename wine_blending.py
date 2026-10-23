@@ -103,7 +103,7 @@ def _(colors):
 
 @app.cell
 def _(sns):
-    vwine_to_pie_color = {
+    wine_to_pie_color = {
         # reds: three shades of red/purple
         **dict(zip(["Cab. Sauv.", "Merlot", "Cab. Franc"],
                    sns.color_palette("Reds_r", 4)[:3])),
@@ -111,7 +111,7 @@ def _(sns):
         **dict(zip(["Sauv. Blanc", "Bordeaux Blanc"],
                    sns.color_palette("YlOrBr", 4)[1:3])),
     }
-    return
+    return (wine_to_pie_color,)
 
 
 @app.cell(hide_code=True)
@@ -399,14 +399,27 @@ def _(
     constituents,
     parent_fprints,
     plt,
+    sigmas,
     wine_to_color,
 ):
-    def draw_lollipop(ax, pos, val, color):
+    def draw_lollipop(ax, pos, val, color, sigma=None):
         ax.plot([0, val], [pos, pos], color=color, zorder=100)
         ax.scatter([val], [pos], color=color, zorder=100, s=8**2, clip_on=False)
+        if sigma is not None:
+            ax.errorbar(
+                val, pos, xerr=sigma, fmt="none", ecolor="black",
+                elinewidth=3, capsize=3, zorder=102, clip_on=False,
+            )
+
+    def draw_bar(ax, pos, val, color, sigma=None):
+        ax.barh(
+            pos, val, height=0.6, color=color, zorder=100,
+            xerr=sigma,
+            error_kw={"ecolor": "black", "elinewidth": 1, "capsize": 0, "zorder": 102},
+        )
 
     def viz_fingerprints(
-        parent_fprints, blend_data, constituents,
+        parent_fprints, blend_data, constituents, sigmas,
         constituent_to_xmax=constituent_to_xmax, savename=None
     ):
         wines = parent_fprints.index
@@ -430,7 +443,10 @@ def _(
             axs[c].xaxis.set_major_locator(MaxNLocator(nbins=4))
             for w, wine in enumerate(wines):
                 conc = parent_fprints.loc[wine, constituent]
-                draw_lollipop(axs[c], w, conc, wine_to_color[wine])
+                draw_bar(
+                    axs[c], w, conc, 
+                    wine_to_color[wine], sigma=sigmas[constituent]
+                )
 
             yticks = list(range(n_wines))
             yticklabels = list(wines)
@@ -443,10 +459,10 @@ def _(
                 else:
                     color = wine_to_color[blend_id]
                 conc = blend_data.loc[blend_id, constituent]
-                draw_lollipop(
+                draw_bar(
                     axs[c],
                     n_wines + blend_id + d, conc,
-                    color
+                    color, sigma=sigmas[constituent]
                 )
 
             yticks = yticks + list(range(n_wines + d, n_wines + n_blends + d))
@@ -496,7 +512,7 @@ def _(
         return fig
 
     viz_fingerprints(
-        parent_fprints, blend_data, constituents,
+        parent_fprints, blend_data, constituents, sigmas,
         constituent_to_xmax=constituent_to_xmax,
         savename="red_fingerprints"
     )
@@ -647,6 +663,17 @@ def _(np):
 
 
 @app.cell
+def _(blending_probs, np, ols_baselines):
+    for _b in range(4):
+        print("BLEND")
+        _res = ols_baselines(blending_probs[_b], verbose=False)
+        for _m in ("SCTLS", "SCOLS", "COLS", "SOLS", "OLS"):
+            print(_m)
+            print(np.round(_res[f"{_m} MAE"]*100, decimals=1))
+    return
+
+
+@app.cell
 def _(
     assert_feasible_vol_fracs,
     blending_prob,
@@ -659,6 +686,9 @@ def _(
         blending_prob, sum_to_one=True, scale=True, w=1e3,
         verbose=True
     ):
+        if verbose:
+            print("sum-to-one constraint? ", sum_to_one)
+            print("scale? ", scale)
         W, A, b = build_linear_system(blending_prob)
         n = len(b)
 
@@ -669,11 +699,15 @@ def _(
         if sum_to_one:
             A = np.vstack([A, w * np.ones(A.shape[1])])
             b = np.append(b, w)
-
+        else:
+            b = b.reshape((n, ))
+ 
+        if verbose:
+            print("shape A: ", np.shape(A))
+            print("shape b: ", np.shape(b))
+    
         x, _ = nnls(A, b)
         if verbose:
-            print("sum-to-one constraint? ", sum_to_one)
-            print("scale? ", scale)
             print("sum b4 normalize: ", np.sum(x))
             print("\n")
         x = x / np.sum(x)
@@ -696,6 +730,7 @@ def _(
         for method in ["SCOLS", "OLS", "COLS", "SOLS", "SCTLS"]:
             x = [bp.blend_makeup[wine] for wine in bp.wines]
             res[method + " RMSE"] = np.sqrt(np.mean((x - res["x_" + method]) ** 2))
+            res[method + " MAE"] = np.mean(np.abs(x - res["x_" + method]))
         return res
 
     ols_baselines(blending_prob)
@@ -724,16 +759,18 @@ def _(
 
         fig = plt.figure(figsize=(7, 6))
         ax = fig.add_subplot(projection="ternary")
-        ax.set_tlabel(wines[0] + " [volume %]")
-        ax.set_llabel(wines[1] + " [volume %]")
-        ax.set_rlabel(wines[2] + " [volume %]")
+        ax.set_tlabel(wines[0] + " [vol. %]")
+        ax.set_llabel(wines[1] + " [vol. %]")
+        ax.set_rlabel(wines[2] + " [vol. %]")
         for _ax in [ax.taxis, ax.laxis, ax.raxis]:
             _ax.set_label_position("tick1")
             _ax.set_major_locator(MultipleLocator(0.1))
             _ax.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
         ax.grid(which="major", linestyle="-", alpha=0.3)
 
-        sq_errs = {m: [] for m in methods}
+        err_type = "MAE"
+        errors = dict(zip(methods, np.zeros(len(methods))))
+        error_labels = {}
         for blend_id, bp in enumerate(blending_probs):
             res = ols_baselines(bp, verbose=False)
             x_true = np.array([bp.blend_makeup[w] for w in wines])
@@ -742,32 +779,37 @@ def _(
             ax.scatter(
                 *x_true, marker="^", facecolor=c, edgecolor="black",
                 s=90, zorder=10, clip_on=False,
-            )
+            ) # true
             for m in methods:
                 x = res["x_" + m]
+                errors[m] += res[m + " " + err_type]
+            
                 # line from truth to prediction = error
                 ax.plot(
-                    *np.column_stack([x_true, x]), color=c, lw=0.8, alpha=0.6, zorder=1
+                    *np.column_stack([x_true, x]), 
+                    color=c, lw=0.8, alpha=0.6, zorder=1
                 )
                 ax.scatter(
                     *x, marker=markers[m], facecolor="none", edgecolor=c,
                     linewidths=1.5, s=60, zorder=5, clip_on=False,
                 )
-                sq_errs[m].append((x - x_true) ** 2)
-
-        # RMSE over all blends and all wines
-        rmse = {m: np.sqrt(np.mean(sq_errs[m])) for m in methods}
+        error_labels = {}
+        for m in methods:
+            errors[m] /= len(blending_probs)
+            error_labels[m] = f"{m} ({err_type} {errors[m]:.1%})"
 
         blend_handles = [
             mpl.patches.Patch(color=wine_to_color[i], label=bp.name)
             for i, bp in enumerate(blending_probs)
         ]
+    
         method_handles = [
             Line2D([0], [0], marker="^", ls="None", mfc="white", mec="black",
                    ms=9, label="truth")
-        ] + [
-            Line2D([0], [0], marker=markers[m], ls="None", mfc="white", mec="black",
-                   ms=8, label=f"{m} (RMSE {rmse[m]:.1%})")
+            ] + [
+            Line2D([0], [0], marker=markers[m], ls="None", 
+                   mfc="white", mec="black",
+                   ms=8, label=error_labels[m])
             for m in methods
         ]
         leg1 = ax.legend(handles=blend_handles, loc="upper left",
@@ -1277,8 +1319,7 @@ def _(
             for (w, wine) in enumerate(wines):
                 print(f"\t{wine}:")
                 print(f"\t\tpred: {np.round(100*x_tls[w], decimals=1):.1f}%")
-                print(f"{100 - 2*alpha:.0f}% CI:")
-                print(f"\t\t[{lower[w]}, {upper[w]}]")
+                print(f"\t\t{100 - 2*alpha:.0f}% CI: [{lower[w]}, {upper[w]}]")
 
             # errors
             x_true = np.array(
@@ -1289,7 +1330,8 @@ def _(
             )
             errors = np.abs(x_tls - x_true)
             all_errors.append(errors)
-            print(f"\tmean error: {np.round(100*np.mean(errors), decimals=1)}%")
+            print(f"\tmean MAE: {np.round(100*np.mean(errors), decimals=1)}%")
+            print(f"\tmean RMSE: {np.round(100*np.sqrt(np.mean(errors**2)), decimals=1)}%")
 
         print("mean error over all blends: ")
         mean_all_errors = np.round(np.mean(all_errors, axis=0)*100, decimals=1)
@@ -1603,7 +1645,7 @@ def _():
 
 
 @app.cell
-def _(np, scipy):
+def _():
     def excess_volume(et_vol_per):
         # 22 deg C
         # mixtures
@@ -1631,45 +1673,6 @@ def _(np, scipy):
         print("actual density [g/mL]:", rho_1 + m * (x - x_1))
 
     excess_volume(12.9)
-
-    def blend_contraction(abvs, vol_fracs, abv_data, rho_data, rho_et, deg=2):
-        """
-        volume contraction [%] when blending wines.
-
-        abvs      : ABV of each wine [vol %]
-        vol_fracs : volume fraction of each wine in the blend (before mixing)
-        abv_data, rho_data : density table of ethanol-water [vol %, g/mL],
-                             all at ONE temperature, spanning the wines' ABVs
-        rho_et    : density of pure ethanol at that temperature [g/mL]
-        """
-        # smooth fit to the density table; needs curvature, so deg >= 2
-        coeffs = np.polyfit(abv_data, rho_data, deg)
-        rho = lambda abv: np.polyval(coeffs, abv)
-
-        abvs = np.asarray(abvs, dtype=float) / 100
-        V = np.asarray(vol_fracs, dtype=float)    # basis: volumes of the wines
-
-        m = np.sum(V * rho(100 * abvs))           # total mass (conserved)
-        m_et = np.sum(V * abvs) * rho_et          # ethanol mass (conserved)
-
-        # blend volume V_b satisfies V_b = m / rho(ABV_b), ABV_b = m_et / (rho_et V_b)
-        f = lambda Vb: Vb - m / rho(100 * m_et / (rho_et * Vb))
-        Vb = scipy.optimize.brentq(f, 0.9 * V.sum(), 1.1 * V.sum())
-
-        abv_linear = 100 * np.sum(V * abvs) / V.sum()   # what your model assumes
-        abv_true = 100 * m_et / (rho_et * Vb)
-        return {
-            "contraction [%]": 100 * (1 - Vb / V.sum()),
-            "ABV, linear mixing [%]": abv_linear,
-            "ABV, actual [%]": abv_true,
-        }
-    blend_contraction(
-        abvs=[12.96, 14.35],            # e.g. Cab. Sauv., Cab. Franc
-        vol_fracs=[0.5, 0.5],
-        abv_data=[...], 
-        rho_data=[...], # from a density table
-        rho_et=...,
-    )
     return
 
 
@@ -1959,9 +1962,10 @@ def _(
     wconstituent_to_xmax,
     wconstituents,
     wparent_fprints,
+    wsigmas,
 ):
     viz_fingerprints(
-        wparent_fprints, wblend_fprints, wconstituents, 
+        wparent_fprints, wblend_fprints, wconstituents, wsigmas,
         constituent_to_xmax=wconstituent_to_xmax, savename="white_fingerprints"
     )
     return
@@ -2062,7 +2066,7 @@ def _(
 
         leg1 = ax.legend(
             handles=blend_handles, loc='upper left',
-            bbox_to_anchor=(1.01, 0.8), borderaxespad=0, title='blend',
+            bbox_to_anchor=(1.01, 0.9), borderaxespad=0, title='blend',
             prop={'size': 10}, title_fontsize=12, fontsize=10
         )
         ax.add_artist(leg1)
@@ -2131,13 +2135,15 @@ def _(PercentFormatter, np, ols_baselines, plt, wblending_probs):
 
         ress = [ols_baselines(bp, verbose=False) for bp in wblending_probs]
         x_trues = np.array([wbp.blend_makeup[wines[0]] for wbp in wblending_probs])
+        err_type = "MAE"
         for k, method in enumerate(["SCTLS", "OLS", "COLS", "SOLS", "SCOLS"]):
             x_preds = np.array([res["x_" + method][0] for res in ress])
 
-            err = np.sqrt(np.mean((x_preds - x_trues) **2))
+            errs = np.array([res[method + " " + err_type] for res in ress])
+            err = np.mean(errs)
 
             plt.scatter(
-                x_trues, x_preds, label=f"{method} (RMSE: {err:.1%})",
+                x_trues, x_preds, label=f"{method} ({err_type}: {err:.1%})",
                 facecolors="none", edgecolors=f"C{k}"
             )
         plt.plot([0, 1], [0, 1], color="lightgray", linestyle="--", zorder=0)
