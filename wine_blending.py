@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.25.1"
+__generated_with = "0.17.6"
 app = marimo.App()
 
 
@@ -16,6 +16,7 @@ def _():
     from scipy.optimize import nnls
     import pandas as pd
     from itertools import combinations
+    from scipy.stats import gaussian_kde
     from mpltern.datasets import get_triangular_grid
     import seaborn as sns
     import statsmodels.api as sm
@@ -231,7 +232,6 @@ def _(np):
             np.linalg.norm(x_a) * np.linalg.norm(x_b)
         )
         return np.acos(cos_theta) * 180 / np.pi
-
     return (fingerprint_angles,)
 
 
@@ -489,7 +489,7 @@ def _(
         offset_pts = -(max_w_px * 72 / fig.dpi + pad_pts)
 
         groups = [("parents", (n_wines - 1) / 2)]          # centered on the wines
- 
+
         d = 1  # same spacing as above
         groups.append(("blends", n_wines + d + (n_blends - 1) / 2))
 
@@ -549,7 +549,6 @@ def _(dataclass, pd):
 
         # true makeup
         blend_makeup : dict
-
     return (WineBlendingProb,)
 
 
@@ -633,7 +632,6 @@ def _(np):
         assert b.shape == (M, 1)
 
         return W, A, b
-
     return (build_linear_system,)
 
 
@@ -658,19 +656,41 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
-
     return (assert_feasible_vol_fracs,)
 
 
 @app.cell
 def _(blending_probs, np, ols_baselines):
-    for _b in range(4):
-        print("BLEND")
-        _res = ols_baselines(blending_probs[_b], verbose=False)
-        for _m in ("SCTLS", "SCOLS", "COLS", "SOLS", "OLS"):
-            print(_m)
-            print(np.round(_res[f"{_m} MAE"]*100, decimals=1))
-    return
+    def print_stuff(blending_probs, err_type="MAE"):
+        for b, blending_prob in enumerate(blending_probs):
+            print("BLEND", blending_prob.name)
+            res = ols_baselines(blending_prob, verbose=False)
+            for method in ("SCTLS", "SCOLS", "COLS", "SOLS", "OLS"):
+                err = np.round(res[f"{method} {err_type}"]*100, decimals=1)
+                if method == "SCTLS":
+                    # list prediction
+                    x = np.round(100*res[f"x_SCTLS"], decimals=1)
+                    print(f"\t\tpred:", x, " vol %")
+                
+                print(f"\t{method} MAE: {err} vol %")
+            
+        ress = [
+            ols_baselines(blending_prob, verbose=False)
+            for blending_prob in blending_probs
+        ]
+        errs = [res[f"SCTLS {err_type}"] for res in ress]
+        err_vecs = [np.abs(res[f"SCTLS error vector"]) for res in ress]
+
+        print(
+            f"SCTLS avg {err_type} over blends: ", 
+            np.round(np.mean(errs) * 100, decimals=1)
+        )
+        print(
+            f"...by parent: ", 
+            np.round(np.mean(err_vecs, axis=0) * 100, decimals=1)
+        )
+    print_stuff(blending_probs)
+    return (print_stuff,)
 
 
 @app.cell
@@ -701,11 +721,11 @@ def _(
             b = np.append(b, w)
         else:
             b = b.reshape((n, ))
- 
+
         if verbose:
             print("shape A: ", np.shape(A))
             print("shape b: ", np.shape(b))
-    
+
         x, _ = nnls(A, b)
         if verbose:
             print("sum b4 normalize: ", np.sum(x))
@@ -729,6 +749,7 @@ def _(
 
         for method in ["SCOLS", "OLS", "COLS", "SOLS", "SCTLS"]:
             x = [bp.blend_makeup[wine] for wine in bp.wines]
+            res[method + " error vector"] = x - res["x_" + method]
             res[method + " RMSE"] = np.sqrt(np.mean((x - res["x_" + method]) ** 2))
             res[method + " MAE"] = np.mean(np.abs(x - res["x_" + method]))
         return res
@@ -783,7 +804,7 @@ def _(
             for m in methods:
                 x = res["x_" + m]
                 errors[m] += res[m + " " + err_type]
-            
+
                 # line from truth to prediction = error
                 ax.plot(
                     *np.column_stack([x_true, x]), 
@@ -802,7 +823,7 @@ def _(
             mpl.patches.Patch(color=wine_to_color[i], label=bp.name)
             for i, bp in enumerate(blending_probs)
         ]
-    
+
         method_handles = [
             Line2D([0], [0], marker="^", ls="None", mfc="white", mec="black",
                    ms=9, label="truth")
@@ -997,7 +1018,7 @@ def _(assert_feasible_vol_fracs, build_linear_system, copy, np, scipy):
             # new blending problem
             new_blending_prob = copy.deepcopy(blending_prob)
             new_blending_prob.wines = new_wines
-  
+
             # run on reduced TLS problem
             _x_tls, _delta_Ab = constrained_tls_soln(
                 new_blending_prob, verbose=verbose, run_checks=run_checks
@@ -1014,7 +1035,6 @@ def _(assert_feasible_vol_fracs, build_linear_system, copy, np, scipy):
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
-
     return (constrained_tls_soln,)
 
 
@@ -1107,7 +1127,6 @@ def _(copy, np):
             new_bp.blend_fprint.loc[constituent] += sigma * np.random.normal()
 
         return new_bp
-
     return (sample_perturbed_problem,)
 
 
@@ -1143,7 +1162,6 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
-
     return (sample_perturbed_solutions,)
 
 
@@ -1202,6 +1220,26 @@ def _(np):
 
 
 @app.cell
+def _(blending_probs, np, sample_perturbed_solutions, sm):
+    def hdr_coverage(x_samples, x_true):
+        """Smallest HDR mass containing x_true, using the same KDE as do_trinary_kde."""
+        data = np.asarray(x_samples).T                          # (3, n)
+        kde = sm.nonparametric.KDEMultivariate(data=data, var_type='ccc')
+        dens_samples = kde.pdf(data)
+        dens_true = kde.pdf(np.asarray(x_true, dtype=float).reshape(3, 1))
+        return np.mean(dens_samples > dens_true)
+
+    def hdr_coverage_all(blending_probs):
+        for blending_prob in blending_probs:
+            xs = sample_perturbed_solutions(blending_prob, n_samples=2500)
+            x_true = [blending_prob.blend_makeup[w] for w in blending_prob.wines]
+            print("hdr:", hdr_coverage(xs, x_true))
+        
+    hdr_coverage_all(blending_probs)
+    return
+
+
+@app.cell
 def _(mo):
     checkbox_kde = mo.ui.checkbox(label="include KDE?")
     checkbox_kde
@@ -1224,7 +1262,7 @@ def _(
     sample_perturbed_solutions,
     wine_to_color,
 ):
-    def draw_simplex(blending_probs):
+    def draw_simplex(blending_probs):    
         wines = blending_probs[0].wines
 
         all_errors = [] # for error analysis
@@ -1316,6 +1354,7 @@ def _(
             #   print estimate and UQ
             ###
             print(f"blend {blend_id+1} TLS:")
+            print(blending_probs[blend_id].name)
             for (w, wine) in enumerate(wines):
                 print(f"\t{wine}:")
                 print(f"\t\tpred: {np.round(100*x_tls[w], decimals=1):.1f}%")
@@ -2093,6 +2132,12 @@ def _(
 def _(viz_correction_heatmaps, wblending_probs):
     # wcorrections = analyze_corrections(wpv_fprints, wblend_fprints, wsigmas)
     viz_correction_heatmaps(wblending_probs, savename="white")
+    return
+
+
+@app.cell
+def _(print_stuff, wblending_probs):
+    print_stuff(wblending_probs)
     return
 
 
