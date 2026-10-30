@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.25.1"
+__generated_with = "0.17.6"
 app = marimo.App()
 
 
@@ -211,7 +211,7 @@ def _(mo):
 
 @app.cell
 def _(np):
-    def fingerprint_angles(
+    def fingerprint_angles_and_distances(
         parent_fprints, wine_a, wine_b, sigmas
     ):
         constituents = parent_fprints.columns
@@ -231,21 +231,28 @@ def _(np):
         cos_theta = np.dot(x_a, x_b) / (
             np.linalg.norm(x_a) * np.linalg.norm(x_b)
         )
-        return np.acos(cos_theta) * 180 / np.pi
-
-    return (fingerprint_angles,)
+        angle = np.acos(np.clip(cos_theta, -1.0, 1.0)) * 180 / np.pi
+        distance = np.linalg.norm(x_a - x_b)  # in units of measurement std devs
+        return angle, distance
+    return (fingerprint_angles_and_distances,)
 
 
 @app.cell
-def _(combinations, fingerprint_angles, parent_fprints, pd, sigmas):
-    pd.Series(
-        {
-            (wine_a, wine_b): fingerprint_angles(
-                parent_fprints, wine_a, wine_b, sigmas
-            )
-            for wine_a, wine_b in combinations(parent_fprints.index, 2)
-        },
-        name="angle [°]",
+def _(
+    combinations,
+    fingerprint_angles_and_distances,
+    parent_fprints,
+    pd,
+    sigmas,
+):
+    _pairs = list(combinations(parent_fprints.index, 2))
+    pd.DataFrame(
+        [
+            fingerprint_angles_and_distances(parent_fprints, wine_a, wine_b, sigmas)
+            for wine_a, wine_b in _pairs
+        ],
+        index=pd.MultiIndex.from_tuples(_pairs, names=["wine a", "wine b"]),
+        columns=["angle [°]", "distance [σ]"],
     )
     return
 
@@ -550,7 +557,6 @@ def _(dataclass, pd):
 
         # true makeup
         blend_makeup : dict
-
     return (WineBlendingProb,)
 
 
@@ -634,7 +640,6 @@ def _(np):
         assert b.shape == (M, 1)
 
         return W, A, b
-
     return (build_linear_system,)
 
 
@@ -659,7 +664,6 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
-
     return (assert_feasible_vol_fracs,)
 
 
@@ -675,9 +679,9 @@ def _(blending_probs, np, ols_baselines):
                     # list prediction
                     x = np.round(100*res[f"x_SCTLS"], decimals=1)
                     print(f"\t\tpred:", x, " vol %")
-            
+
                 print(f"\t{method} MAE: {err} vol %")
-        
+
         ress = [
             ols_baselines(blending_prob, verbose=False)
             for blending_prob in blending_probs
@@ -1040,7 +1044,6 @@ def _(assert_feasible_vol_fracs, build_linear_system, copy, np, scipy):
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
-
     return (constrained_tls_soln,)
 
 
@@ -1050,7 +1053,27 @@ def _(blending_prob, constrained_tls_soln):
         blending_prob, verbose=True, run_checks=True
     )
     x_tls, delta_Ab
-    return (delta_Ab,)
+    return delta_Ab, x_tls
+
+
+@app.cell
+def _(delta_Ab, x_tls):
+    # correction on col i of A = x_i * correction on b
+    _j = 0 # parent mixture ID
+    delta_Ab[:, _j] + delta_Ab[:, -1] * x_tls[_j]
+    return
+
+
+@app.cell
+def _(delta_Ab):
+    delta_Ab[:, -1]
+    return
+
+
+@app.cell
+def _(delta_Ab, x_tls):
+    delta_Ab[:, :3] + delta_Ab[:, -1].reshape((3, 1)) @ x_tls.reshape((1, 3))
+    return
 
 
 @app.cell(hide_code=True)
@@ -1133,7 +1156,6 @@ def _(copy, np):
             new_bp.blend_fprint.loc[constituent] += sigma * np.random.normal()
 
         return new_bp
-
     return (sample_perturbed_problem,)
 
 
@@ -1169,7 +1191,6 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
-
     return (sample_perturbed_solutions,)
 
 
@@ -1239,10 +1260,11 @@ def _(blending_probs, np, sample_perturbed_solutions, sm):
 
     def hdr_coverage_all(blending_probs):
         for blending_prob in blending_probs:
+            print(blending_prob.name)
             xs = sample_perturbed_solutions(blending_prob, n_samples=2500)
             x_true = [blending_prob.blend_makeup[w] for w in blending_prob.wines]
-            print("hdr:", hdr_coverage(xs, x_true))
-    
+            print("hdr:", hdr_coverage(xs, x_true) * 100)
+
     hdr_coverage_all(blending_probs)
     return
 
@@ -1477,24 +1499,24 @@ def _(
     ):
         """
         How many MC samples do we need for the UQ of one blend to settle down?
- 
+
         For each trial, draw MC samples of the predicted make-up and, for each
         n in n_samples_grid, compute the [alpha, 50, 100-alpha] percentiles of
         each wine's predicted volume fraction. Across trials, report mean +/- std.
- 
+
         nested=True draws one pool of max(n_samples_grid) samples per trial and
         uses its first n samples for each n (much cheaper; the curves within a
         trial are then correlated, but the across-trial std at each n is still
         the right Monte Carlo error). nested=False draws fresh samples for
         every (trial, n).
- 
+
         Returns (fig, results), with results a tidy DataFrame of every estimate.
         """
         np.random.seed(seed)  # sample_perturbed_problem uses the global RNG
         wines = blending_prob.wines
         n_grid = np.sort(np.asarray(n_samples_grid, dtype=int))
         qs = {"lower": alpha, "median": 50.0, "upper": 100.0 - alpha}
- 
+
         rows = []
         for trial in range(n_trials):
             if nested:
@@ -1514,7 +1536,7 @@ def _(
         results = pd.DataFrame(rows)
         summary = (results.groupby(["wine", "stat", "n_samples"])["value"]
                    .agg(["mean", "std"]).reset_index())
- 
+
         # ---- plot -----------------------------------------------------------
         fig, axs = plt.subplots(
             2, len(wines), figsize=(3.3 * len(wines), 5.5),
@@ -1536,17 +1558,17 @@ def _(
                 pos = s["std"] > 0  # e.g. a 10th pct. pinned at 0 by the non-negativity step
                 ax_err.plot(s.n_samples[pos], s["std"][pos], marker="o", ms=3,
                             color=style["color"])
- 
+
             if x_point is not None:
                 ax.axhline(
                     x_point[w], color="k", ls=":", lw=1, label="point est."
                 )
- 
+
             # 1/sqrt(n) guide anchored at the first grid point
             s0 = summary[(summary.wine == wine) & (summary.n_samples == n_grid[0])]["std"].max()
             ax_err.plot(n_grid, s0 * np.sqrt(n_grid[0] / n_grid), color="gray",
                         ls="--", lw=1, label=r"$\propto 1/\sqrt{n}$")
- 
+
             ax.set_title(wine)
             ax.set_xscale("log")
             ax.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=None))
@@ -1558,7 +1580,7 @@ def _(
         axs[0, -1].legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
         axs[1, -1].legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
         fig.suptitle(f"blend {blending_prob.name}: MC convergence ({n_trials} trials)")
- 
+
         if savename is not None:
             fig.savefig(savename + ".pdf", format="pdf", bbox_inches="tight")
         return fig, results
@@ -1613,6 +1635,15 @@ def _(blending_probs, constrained_tls_soln, pd):
     corrections = analyze_corrections(blending_probs)
     corrections.head()
     return (corrections,)
+
+
+@app.cell
+def _(corrections, sigmas):
+    _blend = corrections[corrections["wine"] == "blend"]
+    (_blend["Δ"] / _blend["constituent"].map(sigmas)).abs().groupby(
+        _blend["constituent"]
+    ).mean()
+    return
 
 
 @app.cell
@@ -1956,6 +1987,18 @@ def _():
 
 
 @app.cell
+def _(wsigmas):
+    # B2
+    outlier_deviance = (
+        (8.952 - (7.283 + 7.272) / 2) / wsigmas["abs. [280 nm]"]
+        +
+        (5.776 - (4.133 + 4.147) / 2) / wsigmas["abs. [320 nm]"]
+    ) / 2
+    outlier_deviance
+    return
+
+
+@app.cell
 def _(pd, spec_cols):
     def read_uv_viz_data(sheet_name="Table", rm_outlier=True):
         path = "data/whitewineblendtrial.xlsx"
@@ -2043,7 +2086,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    ww_fp = mo.ui.dropdown(options=["chemistry", "UV-viz", "both"], label="choose white wine FP", value="both")
+    ww_fp = mo.ui.dropdown(options=["chemistry", "UV-viz", "both", "sugar"], label="choose white wine FP", value="both")
     ww_fp
     return (ww_fp,)
 
@@ -2242,6 +2285,8 @@ def _(
             prop={'size': 10}, title_fontsize=12, fontsize=10
         )
         ax.add_artist(leg1)
+        ax.tick_params(axis="y", pad=8)   # nudge the y "0" left
+        # ax.tick_params(axis="x", pad=6)   # nudge the x labels down
 
         leg2 = ax.legend(
             handles=symbol_handles, loc='upper left',
