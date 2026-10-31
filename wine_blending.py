@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.17.6"
+__generated_with = "0.25.1"
 app = marimo.App()
 
 
@@ -234,6 +234,7 @@ def _(np):
         angle = np.acos(np.clip(cos_theta, -1.0, 1.0)) * 180 / np.pi
         distance = np.linalg.norm(x_a - x_b)  # in units of measurement std devs
         return angle, distance
+
     return (fingerprint_angles_and_distances,)
 
 
@@ -557,6 +558,7 @@ def _(dataclass, pd):
 
         # true makeup
         blend_makeup : dict
+
     return (WineBlendingProb,)
 
 
@@ -625,12 +627,12 @@ def _(np):
         b = bp.blend_fprint[bp.constituents].to_numpy(dtype=float)
         b = b.reshape((M, 1))
 
-        sigma_bar = np.mean(
-            [bp.sigmas[constituent] for constituent in bp.constituents]
-        )
+        # sigma_bar = np.mean(
+        #     [bp.sigmas[constituent] for constituent in bp.constituents]
+        # )
         W = np.diag(
             [
-                sigma_bar / bp.sigmas[constituent] 
+                1.0 / bp.sigmas[constituent] 
                 for constituent in bp.constituents
             ]
         )
@@ -640,6 +642,7 @@ def _(np):
         assert b.shape == (M, 1)
 
         return W, A, b
+
     return (build_linear_system,)
 
 
@@ -647,7 +650,13 @@ def _(np):
 def _(blending_prob, build_linear_system):
     W, A, b = build_linear_system(blending_prob)
     W, A, b
-    return (b,)
+    return A, b
+
+
+@app.cell
+def _(A, np):
+    np.linalg.svdvals(A) # same for every problem
+    return
 
 
 @app.cell(hide_code=True)
@@ -664,6 +673,7 @@ def _(np):
         assert np.all(x <= 1.0)
         assert np.all(x >= 0.0)
         assert np.isclose(np.sum(x), 1.0)
+
     return (assert_feasible_vol_fracs,)
 
 
@@ -1044,6 +1054,7 @@ def _(assert_feasible_vol_fracs, build_linear_system, copy, np, scipy):
             assert_feasible_vol_fracs(x_tls)
 
         return np.ravel(x_tls), delta_Ab
+
     return (constrained_tls_soln,)
 
 
@@ -1156,6 +1167,7 @@ def _(copy, np):
             new_bp.blend_fprint.loc[constituent] += sigma * np.random.normal()
 
         return new_bp
+
     return (sample_perturbed_problem,)
 
 
@@ -1191,6 +1203,7 @@ def _(constrained_tls_soln, sample_perturbed_problem):
             x_tlss.append(x_tls)
 
         return x_tlss
+
     return (sample_perturbed_solutions,)
 
 
@@ -1433,7 +1446,7 @@ def _(
             symbol_handles = [
                 Line2D(
                     [0], [0], marker='^', color='none', markeredgecolor='black',
-                    markerfacecolor='none', markersize=markersize, label='actual'
+                    markerfacecolor='none', markersize=markersize, label='true'
                 ),
                 Line2D(
                     [0], [0], marker='*', color='none', markeredgecolor='black',
@@ -2043,6 +2056,14 @@ def _(group, raw_spec_data, spec_cols):
     return (spec_data,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    heteroskedastic?
+    """)
+    return
+
+
 @app.cell
 def _(spec_data):
     wparent_fprints_spec = spec_data.loc[["Bordeaux Blanc", "Sauv. Blanc"]]
@@ -2186,6 +2207,12 @@ def _(
     return
 
 
+@app.cell
+def _(build_linear_system, np, wblending_probs):
+    np.linalg.svdvals(build_linear_system(wblending_probs[1])[1]) # same for every problem
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -2271,7 +2298,7 @@ def _(
         symbol_handles = [
             Line2D(
                 [0], [0], marker='^', color='none', markeredgecolor='black',
-                markerfacecolor='none', markersize=ms, label='actual'
+                markerfacecolor='none', markersize=ms, label='true'
             ),
             Line2D(
                 [0], [0], marker='*', color='none', markeredgecolor='black',
