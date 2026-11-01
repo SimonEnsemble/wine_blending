@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.25.1"
+__generated_with = "0.25.2"
 app = marimo.App()
 
 
@@ -51,6 +51,7 @@ def _():
         copy,
         dataclass,
         get_triangular_grid,
+        mcolors,
         mo,
         mpl,
         nnls,
@@ -406,6 +407,7 @@ def _(
     blend_data,
     constituent_to_xmax,
     constituents,
+    mcolors,
     parent_fprints,
     plt,
     sigmas,
@@ -422,9 +424,22 @@ def _(
 
     def draw_bar(ax, pos, val, color, sigma=None):
         ax.barh(
-            pos, val, height=0.6, color=color, zorder=100,
+            pos, val, height=0.6, zorder=100,
+            facecolor=mcolors.to_rgba(color, alpha=0.1), 
+            edgecolor=color, linewidth=2,
             xerr=sigma,
-            error_kw={"ecolor": "black", "elinewidth": 1, "capsize": 0, "zorder": 102},
+            error_kw={
+                "ecolor": "black", "elinewidth": 1, "capsize": 0, 
+                "zorder": 102
+            }
+        )
+        # label inside the bar if it fits, otherwise just past the bar's end (and error bar)
+        inside = val > 1.0
+        x = 0 if inside else val + (sigma or 0)
+        ax.annotate(
+            f"{val:.2f}", xy=(x, pos), xytext=(3, 0), 
+            textcoords="offset points",
+            ha="left", va="center", fontsize=7, zorder=103
         )
 
     def viz_fingerprints(
@@ -482,9 +497,10 @@ def _(
             ymax += n_blends + d
 
             axs[c].set_yticks(yticks, yticklabels)
-            axs[c].set_ylim(ymax, -0.5)  # inverted so first wine is at the top
+            axs[c].set_ylim(ymax + 0.25, -0.5)# inverted so first wine is at the top
             axs[c].set_xlabel(constituent)
             axs[c].set_xlim(0.0, constituent_to_xmax[constituent])
+            axs[c].tick_params(axis="y", which="both", length=0)
 
         # label parent and blend
         # measure how wide the tick labels are so the group labels clear them
@@ -650,12 +666,13 @@ def _(np):
 def _(blending_prob, build_linear_system):
     W, A, b = build_linear_system(blending_prob)
     W, A, b
-    return A, b
+    return A, W, b
 
 
 @app.cell
-def _(A, np):
-    np.linalg.svdvals(A) # same for every problem
+def _(A, W, np):
+    # singular values of A---same for every problem
+    np.linalg.svdvals(W @ A)
     return
 
 
@@ -1067,23 +1084,70 @@ def _(blending_prob, constrained_tls_soln):
     return delta_Ab, x_tls
 
 
-@app.cell
-def _(delta_Ab, x_tls):
-    # correction on col i of A = x_i * correction on b
-    _j = 0 # parent mixture ID
-    delta_Ab[:, _j] + delta_Ab[:, -1] * x_tls[_j]
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    check relationship on corrections
+    """)
     return
 
 
 @app.cell
-def _(delta_Ab):
-    delta_Ab[:, -1]
+def _(delta_Ab, x_tls):
+    # correction on col i of A = x_i * correction on b
+    _j = 1 # parent mixture ID
+    delta_Ab[:, _j] + delta_Ab[:, -1] * x_tls[_j]
     return
 
 
 @app.cell
 def _(delta_Ab, x_tls):
     delta_Ab[:, :3] + delta_Ab[:, -1].reshape((3, 1)) @ x_tls.reshape((1, 3))
+    return
+
+
+@app.cell
+def _(blending_prob):
+    blending_prob.constituents
+    return
+
+
+@app.cell
+def _(blending_probs, build_linear_system, constrained_tls_soln, np, pd):
+    def characterize_mass_imbalances(blending_prob):
+        W, A, b = build_linear_system(blending_prob)
+        x_tls, delta_Ab = constrained_tls_soln(blending_prob)
+
+        # mass imbalance: blend fingerprint predicted from the measured parents minus the measured blend
+        r = A @ x_tls - b.ravel()
+
+        # sanity check: since ΔA = -Δb xᵀ, the imbalance is r = -(1 + ‖x‖²) Δb
+        assert np.allclose(r, -(1 + x_tls @ x_tls) * delta_Ab[:, -1])
+
+        return pd.DataFrame({
+            "blend": blending_prob.name,
+            "constituent": blending_prob.constituents,
+            "error": np.abs(r),
+            "error / sigma": np.abs(r) * np.diag(W),  # W = diag(1/σ)
+        })
+
+    def avg_mass_imbalances(blending_probs):
+        imbalances = pd.concat(
+            [
+                characterize_mass_imbalances(bp) 
+                for bp in blending_probs
+            ]
+        )
+        return imbalances.groupby(
+            "constituent", sort=False)[["error", "error / sigma"]].mean()
+
+    avg_mass_imbalances(blending_probs)    # reds
+    return avg_mass_imbalances, characterize_mass_imbalances
+
+
+@app.cell
+def _(characterize_mass_imbalances, wblending_probs):
+    characterize_mass_imbalances(wblending_probs[0])
     return
 
 
@@ -1194,7 +1258,7 @@ def _(blending_prob, np, sample_perturbed_problem):
 def _(constrained_tls_soln, sample_perturbed_problem):
     def sample_perturbed_solutions(
         blending_prob,
-        n_samples=100
+        n_samples=2500
     ):
         x_tlss = []
         for s in range(n_samples):
@@ -1715,7 +1779,7 @@ def _(blending_probs, constrained_tls_soln, np, pd, plt, sns):
 
         fig, axs = plt.subplots(
             nrows, ncols, sharex=True, sharey=True, layout="constrained",
-            figsize=(6, 6),
+            figsize=(6, 6) if savename == "red" else (8, 6),
             squeeze=False,
         )
         axs_flat = axs.ravel()
@@ -2007,13 +2071,19 @@ def _(wsigmas):
         +
         (5.776 - (4.133 + 4.147) / 2) / wsigmas["abs. [320 nm]"]
     ) / 2
-    outlier_deviance
+    # SB
+    outlier_deviance2 = (
+        (6.387 - (5.888 + 5.88) / 2) / wsigmas["abs. [280 nm]"]
+        +
+        (5.281 - (4.835 + 4.829) / 2) / wsigmas["abs. [320 nm]"]
+    ) / 2
+    outlier_deviance, outlier_deviance2
     return
 
 
 @app.cell
 def _(pd, spec_cols):
-    def read_uv_viz_data(sheet_name="Table", rm_outlier=True):
+    def read_uv_viz_data(sheet_name="Table", rm_outliers=True):
         path = "data/whitewineblendtrial.xlsx"
         # Find the header row (first column == "#") to skip the instrument metadata
         raw = pd.read_excel(path, sheet_name=sheet_name, header=None)
@@ -2032,15 +2102,17 @@ def _(pd, spec_cols):
         out = df.set_index("Name")[abs_cols]
         out.columns = [f"abs. [{w} nm]" for w in wavelengths]
 
-        if rm_outlier:
+        if rm_outliers:
             print("remove outlier B2 1")
+            print("remove outlier SB 3")
             out = out[out.index != "B2 1"]
+            out = out[out.index != "SB 3"]
 
         out = out[spec_cols]
 
         return out
 
-    raw_spec_data = read_uv_viz_data(rm_outlier=True)
+    raw_spec_data = read_uv_viz_data(rm_outliers=True)
     group = raw_spec_data.index.str.replace(r"\s+\d+$", "", regex=True)
     raw_spec_data
     return group, raw_spec_data
@@ -2061,6 +2133,55 @@ def _(mo):
     mo.md(r"""
     heteroskedastic?
     """)
+    return
+
+
+@app.cell
+def _(np, plt, raw_spec_data, sns, wsigmas):
+    def viz_uv_heteroscedasticity(raw_spec_data, wavelength=280):
+        """Beeswarm of each replicate's deviation from its sample mean vs. that mean.
+ 
+        Homoscedastic errors: similar vertical spread at every mean (the ±SD band).
+        Constant CV: spread widening in proportion to the mean (the ±CV funnel).
+        """
+        col = f"abs. [{wavelength} nm]"
+        group = np.asarray(
+            raw_spec_data.index.str.replace(r"\s+\d+$", "", regex=True)
+        )  # "BB 1" -> "BB"
+        g = raw_spec_data[col].groupby(group)
+        m, s, dof = g.mean(), g.std(), g.count() - 1
+        mean = g.transform("mean")
+ 
+        fig, ax = plt.subplots(figsize=(4.5, 3.6))
+        sns.swarmplot(
+            x=mean, y=raw_spec_data[col] - mean, 
+            native_scale=True, color="k", ax=ax
+        )
+        for sample in m.index:
+            ax.annotate(
+                sample, (m[sample], 0), xytext=(0, -14), 
+                textcoords="offset points",
+                ha="center", fontsize=8, color="0.4"
+            )
+ 
+        xs = np.linspace(m.min(), m.max(), 50)
+        ax.axhline(0, color="0.6", lw=0.8)
+        for sign in (1, -1):
+            ax.axhline(
+                sign * wsigmas[col], ls="--", color="C0",
+                label=f"±constant SD = {wsigmas[col]:.3f}" if sign > 0 else None
+            )
+ 
+        ax.set(
+            title=col, xlabel="sample mean", ylabel="deviation from sample mean"
+        )
+        ax.legend(frameon=False, fontsize=9)
+        fig.tight_layout()
+        plt.savefig(f"heteroscedasticity_{wavelength}.pdf", format="pdf")
+        return fig
+
+    viz_uv_heteroscedasticity(raw_spec_data, wavelength=280)
+    viz_uv_heteroscedasticity(raw_spec_data, wavelength=320)
     return
 
 
@@ -2209,7 +2330,10 @@ def _(
 
 @app.cell
 def _(build_linear_system, np, wblending_probs):
-    np.linalg.svdvals(build_linear_system(wblending_probs[1])[1]) # same for every problem
+    # singular values of A---same for every problem
+    Ww, Aw, _ = build_linear_system(wblending_probs[0])
+    Ww @ Aw
+    np.linalg.svdvals(Ww @ Aw)
     return
 
 
@@ -2235,7 +2359,9 @@ def _(
     wine_to_color,
 ):
     def viz_white_wine_unblending(wblending_probs):
-        wwbp_solns = [sample_perturbed_solutions(wwbp) for wwbp in wblending_probs]
+        wwbp_solns = [
+            sample_perturbed_solutions(wwbp, n_samples=2500) for wwbp in wblending_probs
+        ]
 
         wines = wblending_probs[0].wines
 
@@ -2334,6 +2460,41 @@ def _(
 
 
 @app.cell
+def _(avg_mass_imbalances, wblending_probs):
+    avg_mass_imbalances(wblending_probs)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    get HDRS
+    """)
+    return
+
+
+@app.cell
+def _(np, sample_perturbed_solutions, sm, wblending_probs):
+    def hdr_coverage_1d(x_samples, x_true):
+        """Smallest HDR mass containing x_true (1D analog of hdr_coverage)."""
+        data = np.asarray(x_samples, dtype=float)
+        kde = sm.nonparametric.KDEMultivariate(data=data, var_type='c')
+        dens_samples = kde.pdf(data)
+        dens_true = kde.pdf(np.atleast_1d(float(x_true)))
+        return np.mean(dens_samples > dens_true)
+
+    def hdr_coverage_all_white(wblending_probs, n_samples=2500):
+        for wbp in wblending_probs:
+            xs = sample_perturbed_solutions(wbp, n_samples=n_samples)
+            x0s = [x[0] for x in xs]  # vol. frac. of wines[0] = Bordeaux Blanc
+            x0_true = wbp.blend_makeup[wbp.wines[0]]
+            print(wbp.name, "hdr:", hdr_coverage_1d(x0s, x0_true) * 100)
+
+    hdr_coverage_all_white(wblending_probs)
+    return
+
+
+@app.cell
 def _(viz_correction_heatmaps, wblending_probs):
     # wcorrections = analyze_corrections(wpv_fprints, wblend_fprints, wsigmas)
     viz_correction_heatmaps(wblending_probs, savename="white")
@@ -2398,7 +2559,7 @@ def _(PercentFormatter, np, ols_baselines, plt, wblending_probs):
             )
         plt.plot([0, 1], [0, 1], color="lightgray", linestyle="--", zorder=0)
         plt.legend(fontsize=10)
-
+        plt.savefig("white_OLS_comparison.pdf", format="pdf")
         plt.show()
 
     compare_with_ols(wblending_probs)
