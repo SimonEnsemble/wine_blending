@@ -183,6 +183,12 @@ def _(np, pd):
 
 
 @app.cell
+def _(delta_Ab):
+    delta_Ab
+    return
+
+
+@app.cell
 def _(constituents):
     constituents
     return
@@ -724,6 +730,7 @@ def _(blending_probs, np, ols_baselines):
             f"...by parent: ", 
             np.round(np.mean(err_vecs, axis=0) * 100, decimals=1)
         )
+    
     print_stuff(blending_probs)
     return (print_stuff,)
 
@@ -738,7 +745,7 @@ def _(
     np,
 ):
     def ols_soln(
-        blending_prob, sum_to_one=True, scale=True, w=1e3,
+        blending_prob, sum_to_one=True, scale=True, w=1e2,
         verbose=True
     ):
         if verbose:
@@ -746,10 +753,14 @@ def _(
             print("scale? ", scale)
         W, A, b = build_linear_system(blending_prob)
         n = len(b)
+    
 
         if scale:
             A = W @ A
             b = W @ b
+            w = w * np.max(W @ A)
+        else:
+            w = w * np.max(A)
 
         if sum_to_one:
             A = np.vstack([A, w * np.ones(A.shape[1])])
@@ -2483,7 +2494,7 @@ def _(np, sample_perturbed_solutions, sm, wblending_probs):
         dens_true = kde.pdf(np.atleast_1d(float(x_true)))
         return np.mean(dens_samples > dens_true)
 
-    def hdr_coverage_all_white(wblending_probs, n_samples=2500):
+    def hdr_coverage_all_white(wblending_probs, n_samples=5000):
         for wbp in wblending_probs:
             xs = sample_perturbed_solutions(wbp, n_samples=n_samples)
             x0s = [x[0] for x in xs]  # vol. frac. of wines[0] = Bordeaux Blanc
